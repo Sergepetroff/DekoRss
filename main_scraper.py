@@ -4,6 +4,8 @@ from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 from feedgen.feed import FeedGenerator
 from datetime import datetime, timezone
+from email.utils import format_datetime
+
 
 # Конфигурация
 LOGIN_URL = "https://www.livejournal.com/login.bml"
@@ -74,35 +76,52 @@ async def scrape_and_generate_rss():
         print("Внимание: посты не найдены!")
 
     for post in posts:
-        titletag = post.find("h3", class_="item-title") or post.find("h2", class_="entry-title")
+        # Заголовок
+        titletag = post.find('dt', class_='entry-title')
         title = titletag.get_text(strip=True) if titletag else "No Title"
-        linktag = titletag.find("a", href=True) if titletag else None
-        link = linktag["href"] if linktag else LJ_URL
-        if link and link.startswith("/"):
+
+        # Ссылка
+        linktag = titletag.find('a', href=True) if titletag else None
+        link = linktag['href'] if linktag else None
+        if link and link.startswith('/'):
             link = "https://dekodeko.livejournal.com" + link
+        if not link:
+            link = LJ_URL
 
-        datetag = post.find("time", class_="item-date") or post.find("span", class_="entry-date")
-        pubdate = datetag.get("datetime") if datetag and datetag.has_attr("datetime") else datetime.now(timezone.utc).isoformat()
-        contenttag = post.find("div", class_="entry-content")
-#        content = contenttag.get_text(strip=True)[:500] if contenttag else ""
-        content = post.find("div", class_="entry-content")
-        description = content.get_text(strip=True) if content else ""
-        pubdate = post.find("time").get("datetime") if post.find("time") else None
+        # Дата публикации
+        datetag = post.find('abbr', class_='updated')
+        if datetag and datetag.has_attr('title'):
+            dt_obj = datetime.fromisoformat(datetag['title'])
+            pubdate = format_datetime(dt_obj)
+        else:
+            pubdate = None
 
-        if title == "No Title" and description:
-            title = description[:40]
+        contenttag = post.find('dd', class_='entry-text')
+        description = contenttag.get_text(strip=True) if contenttag else ""
 
-        guid_value = hashlib.md5(link.encode('utf-8')).hexdigest()
+
+
+        # Добавление в RSS
         fe = fg.add_entry()
         fe.title(title)
         fe.link(href=link)
         fe.description(description)
-        if pubdate:
-            fe.published(pubdate)
-        fe.guid(link, permalink=True)
 
-    fg.rss_file(RSS_FILENAME)
-    print(f"RSS успешно создан: {RSS_FILENAME}")
+        if pubdate:
+            fe.pubDate(pubdate)
+
+        guid = link if link else hashlib.md5(title.encode('utf-8')).hexdigest()
+        fe.guid(guid, permalink=bool(link))
+
+        print(f"Заголовок: {title}")
+        print(f"Ссылка: {link}")
+        print(f"Дата публикации (raw): {datetag['title'] if datetag else 'нет даты'}")
+        print(f"Дата публикации (форматированная): {pubdate}")
+        print(f"GUID: {guid}")
+        print("-" * 40)
+        # После того, как все записи добавлены
+        fg.rss_file(RSS_FILENAME)
+        print(f"RSS файл записан: {RSS_FILENAME}")
 
 if __name__ == "__main__":
     asyncio.run(scrape_and_generate_rss())
