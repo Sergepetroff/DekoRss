@@ -10,6 +10,7 @@ LOGIN_URL = "https://www.livejournal.com/login.bml"
 LJ_URL = "https://dekodeko.livejournal.com"
 RSS_FILENAME = "dekodeko_lj_feed.xml"
 RSS_URL = "https://sergepetroff.github.io/DekoRss/dekodeko_lj_feed.xml"
+APP_VERSION = 1  # Меняйте это число при обновлениях приложения
 
 USERNAME = "3bepb01"
 PASSWORD = "NUJbWCajZ96!P8t"
@@ -65,7 +66,7 @@ async def scrape_and_generate_rss():
     soup = BeautifulSoup(html, "html.parser")
     fg = FeedGenerator()
     fg.id(LJ_URL)
-    fg.title("LiveJournal RSS")
+    fg.title(f"DekoDeko LiveJournal RSS v{APP_VERSION}")  # Используем версию
     fg.author({"name": USERNAME})
     fg.link(href=LJ_URL, rel="alternate")
     fg.language("ru")
@@ -80,9 +81,20 @@ async def scrape_and_generate_rss():
 
     for i, post in enumerate(posts):
         titletag = post.find("h3", class_="item-title") or post.find("h2", class_="entry-title")
-        title = titletag.get_text(strip=True) if titletag else f"Post #{i+1}"
+        contenttag = post.find("div", class_="entry-content")
+        content = contenttag.get_text(strip=True) if contenttag else ""
+
+        # Получаем title
+        title_raw = titletag.get_text(strip=True) if titletag else ""
+        if not title_raw or title_raw.lower() == "no title":
+            snippet = content[:20] + "..." if len(content) > 20 else content
+            title = f"DekoDeko LiveJournal RSS: {snippet}"
+        else:
+            title = title_raw
+
         linktag = titletag.find("a", href=True) if titletag else None
         link = linktag["href"] if linktag else LJ_URL
+
         datetag = post.find("time", class_="item-date") or post.find("span", class_="entry-date")
         pubdate_raw = datetag.get("datetime") if datetag and datetag.has_attr("datetime") else None
 
@@ -90,20 +102,15 @@ async def scrape_and_generate_rss():
             dt_obj = datetime.fromisoformat(pubdate_raw)
             pubdate_formatted = format_datetime(dt_obj)
         else:
-            # Генерируем уникальную дату, уменьшая на i минут
             dt_obj = now - timedelta(minutes=i)
             pubdate_formatted = format_datetime(dt_obj)
-
-        contenttag = post.find("div", class_="entry-content")
-        content = contenttag.get_text(strip=True)[:500] if contenttag else ""
 
         fe = fg.add_entry()
         fe.title(title)
         fe.link(href=link)
-        fe.description(content)
+        fe.description(content[:500])
         fe.published(pubdate_formatted)
 
-        # Для guid используем хеш от ссылки, чтобы гарантировать уникальность
         guid_hash = hashlib.sha256(link.encode('utf-8')).hexdigest()
         fe.guid(guid_hash)
 
