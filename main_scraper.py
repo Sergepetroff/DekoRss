@@ -8,14 +8,14 @@ from email.utils import format_datetime
 LOGIN_URL = "https://www.livejournal.com/login.bml"
 LJ_URL = "https://dekodeko.livejournal.com"
 RSS_FILENAME = "dekodeko_lj_feed.xml"
-RSS_URL = "https://sergepetroff.github.io/DekoRss/dekodeko_lj_feed.xml"  # ссылка на опубликованный RSS
+RSS_URL = "https://sergepetroff.github.io/DekoRss/dekodeko_lj_feed.xml"
 
 USERNAME = "3bepb01"
 PASSWORD = "NUJbWCajZ96!P8t"
 
 async def login_and_scrape(page):
     print("Переход на страницу логина...")
-    await page.goto(LOGIN_URL, timeout=120000, wait_until="domcontentloaded")
+    await page.goto(LOGIN_URL, timeout=180000, wait_until="domcontentloaded")
     await page.fill('input[name="user"]', USERNAME)
     await page.fill('input[name="password"]', PASSWORD)
     print("Отправляю форму логина...")
@@ -23,7 +23,11 @@ async def login_and_scrape(page):
     await page.wait_for_load_state("domcontentloaded")
 
     print(f"Переход на страницу: {LJ_URL}")
-    await page.goto(LJ_URL, timeout=60000, wait_until="domcontentloaded")
+    try:
+        await page.goto(LJ_URL, timeout=180000, wait_until="domcontentloaded")
+    except Exception as e:
+        print(f"Ошибка перехода на страницу {LJ_URL}: {e}")
+        raise
 
     print("Проверка и обход 18+...")
     try:
@@ -36,15 +40,21 @@ async def login_and_scrape(page):
     except Exception as e:
         print(f"Кнопка 18+ отсутствует или ошибка: {e}")
 
-    await page.wait_for_selector("div.entry-wrap--post", timeout=30000)
+    await page.wait_for_selector("div.entry-wrap--post", timeout=180000)
 
 async def scrape_and_generate_rss():
     async with async_playwright() as p:
         print("Запуск браузера...")
         browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
-        page = await browser.new_page()
 
-        await login_and_scrape(page)
+        page = await browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36")
+
+        try:
+            await login_and_scrape(page)
+        except Exception as e:
+            print(f"Ошибка при переходе на целевую страницу: {e}")
+            await browser.close()
+            return
 
         print("Получаем HTML страницы...")
         html = await page.content()
@@ -58,11 +68,9 @@ async def scrape_and_generate_rss():
     fg.author({"name": USERNAME})
     fg.link(href=LJ_URL, rel="alternate")
     fg.language("ru")
-
-    # Добавляем элемент atom:link rel="self"
     fg.atom_link(href=RSS_URL, rel="self")
 
-    posts = soup.find_all("div", class_="entry-wrap--post")
+    posts = soup.find_all("div.entry-wrap--post")
     if not posts:
         print("Внимание: посты не найдены!")
 
@@ -88,7 +96,7 @@ async def scrape_and_generate_rss():
         fe.link(href=link)
         fe.description(content)
         fe.published(pubdate_formatted)
-        fe.guid(link)  # добавляем уникальный идентификатор
+        fe.guid(link)
 
     fg.rss_file(RSS_FILENAME)
     print(f"RSS файл создан: {RSS_FILENAME}")
