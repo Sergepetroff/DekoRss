@@ -65,7 +65,7 @@ async def scrape_and_generate_rss():
     soup = BeautifulSoup(html, "html.parser")
     fg = FeedGenerator()
     fg.id(LJ_URL)
-    fg.title("LiveJournal RSS")
+    fg.title("DekoDeko LiveJournal RSS") 
     fg.author({"name": USERNAME})
     fg.link(href=LJ_URL, rel="alternate")
     fg.language("ru")
