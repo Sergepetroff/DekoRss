@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 from feedgen.feed import FeedGenerator
@@ -77,20 +78,28 @@ async def scrape_and_generate_rss():
         title = titletag.get_text(strip=True) if titletag else "No Title"
         linktag = titletag.find("a", href=True) if titletag else None
         link = linktag["href"] if linktag else LJ_URL
+        if link and link.startswith("/"):
+            link = "https://dekodeko.livejournal.com" + link
+
         datetag = post.find("time", class_="item-date") or post.find("span", class_="entry-date")
         pubdate = datetag.get("datetime") if datetag and datetag.has_attr("datetime") else datetime.now(timezone.utc).isoformat()
         contenttag = post.find("div", class_="entry-content")
-        content = contenttag.get_text(strip=True)[:500] if contenttag else ""
+#        content = contenttag.get_text(strip=True)[:500] if contenttag else ""
+        content = post.find("div", class_="entry-content")
+        description = content.get_text(strip=True) if content else ""
+        pubdate = post.find("time").get("datetime") if post.find("time") else None
 
-        if title == "No Title" and content:
-            title = content[:20]
+        if title == "No Title" and description:
+            title = description[:40]
 
+        guid_value = hashlib.md5(link.encode('utf-8')).hexdigest()
         fe = fg.add_entry()
         fe.title(title)
         fe.link(href=link)
-        fe.description(content)
-        fe.published(pubdate)
-
+        fe.description(description)
+        if pubdate:
+            fe.published(pubdate)
+        fe.guid(link, permalink=True)
 
     fg.rss_file(RSS_FILENAME)
     print(f"RSS успешно создан: {RSS_FILENAME}")
