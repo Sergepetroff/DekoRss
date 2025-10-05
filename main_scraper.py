@@ -99,7 +99,7 @@ async def scrape_and_generate_rss():
         contenttag = post.find("div", class_="entry-content")
         description = contenttag.get_text(strip=True) if contenttag else ""
 
-        if title == "No Title" and description:
+        if title == "(без темы)" and description:
             title = description[:40]
 
         # Добавление в RSS
