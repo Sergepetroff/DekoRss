@@ -1,34 +1,39 @@
 name: Deploy RSS to GitHub Pages
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
   schedule:
-    - cron: '0 6 * * *'  # запускать каждый день (06:00 UTC)
+    - cron: '0 6 * * *'  # запускать каждый день в 06:00 по UTC
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
 
-      - name: Set up Python
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
         run: |
-          pip install playwright beautifulsoup4 feedgen
+          pip install -r requirements.txt
           playwright install
 
-      - name: Run RSS generator
+      - name: Run your script
         run: python main_scraper.py
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: .         # публиковать весь рабочий каталог
-          keep_files: true
+          publish_dir: .
           publish_branch: gh-pages
