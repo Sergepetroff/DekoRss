@@ -10,6 +10,7 @@ LOGIN_URL = "https://www.livejournal.com/login.bml"
 LJ_URL = "https://dekodeko.livejournal.com"
 RSS_FILENAME = "dekodeko_lj_feed.xml"
 RSS_URL = "https://sergepetroff.github.io/DekoRss/dekodeko_lj_feed.xml"
+APP_VERSION = 1  # Меняйте это число при обновлениях приложения
 
 USERNAME = "3bepb01"
 PASSWORD = "NUJbWCajZ96!P8t"
@@ -65,7 +66,7 @@ async def scrape_and_generate_rss():
     soup = BeautifulSoup(html, "html.parser")
     fg = FeedGenerator()
     fg.id(LJ_URL)
-    fg.title("DekoDeko LiveJournal RSS") 
+    fg.title(f"DekoDeko LiveJournal RSS v{APP_VERSION}")  # Используем версию
     fg.author({"name": USERNAME})
     fg.link(href=LJ_URL, rel="alternate")
     fg.language("ru")
