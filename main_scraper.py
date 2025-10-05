@@ -3,11 +3,12 @@ from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 from feedgen.feed import FeedGenerator
 from datetime import datetime, timezone
+from email.utils import format_datetime
 
-# Конфигурация
 LOGIN_URL = "https://www.livejournal.com/login.bml"
-LJ_URL = "https://dekodeko.livejournal.com"  # Страница для скрапинга после логина
+LJ_URL = "https://dekodeko.livejournal.com"
 RSS_FILENAME = "dekodeko_lj_feed.xml"
+RSS_URL = "https://sergepetroff.github.io/DekoRss/dekodeko_lj_feed.xml"  # ссылка на опубликованный RSS
 
 USERNAME = "3bepb01"
 PASSWORD = "NUJbWCajZ96!P8t"
@@ -19,10 +20,10 @@ async def login_and_scrape(page):
     await page.fill('input[name="password"]', PASSWORD)
     print("Отправляю форму логина...")
     await page.click('button[type="submit"]')
-    await page.wait_for_load_state("load")
+    await page.wait_for_load_state("domcontentloaded")
 
     print(f"Переход на страницу: {LJ_URL}")
-    await page.goto(LJ_URL, timeout=60000, wait_until="load")
+    await page.goto(LJ_URL, timeout=60000, wait_until="domcontentloaded")
 
     print("Проверка и обход 18+...")
     try:
@@ -31,11 +32,10 @@ async def login_and_scrape(page):
         print(f"18+ кнопка видима: {visible}")
         if visible:
             await confirm.click()
-            await page.wait_for_load_state('load')
+            await page.wait_for_load_state('domcontentloaded')
     except Exception as e:
         print(f"Кнопка 18+ отсутствует или ошибка: {e}")
 
-    # Ждём появления постов
     await page.wait_for_selector("div.entry-wrap--post", timeout=30000)
 
 async def scrape_and_generate_rss():
@@ -43,30 +43,24 @@ async def scrape_and_generate_rss():
         print("Запуск браузера...")
         browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = await browser.new_page()
-        page.on("requestfailed", lambda request: print(f"Request failed: {request.url}"))
 
         await login_and_scrape(page)
 
-        print("Ожидание загрузки постов...")
-        try:
-            await page.wait_for_selector("div.entry-wrap--post", timeout=60000)
-        except Exception as e:
-            print(f"Не дождался постов: {e}")
-
-        print("Получение HTML страницы...")
+        print("Получаем HTML страницы...")
         html = await page.content()
-        print("Завершаю работу браузера...")
         await browser.close()
 
-    print("Парсинг и генерация RSS...")
+    print("Генерируем RSS...")
     soup = BeautifulSoup(html, "html.parser")
     fg = FeedGenerator()
     fg.id(LJ_URL)
     fg.title("LiveJournal RSS")
     fg.author({"name": USERNAME})
     fg.link(href=LJ_URL, rel="alternate")
-    fg.description("Auto-generated RSS from LiveJournal")
     fg.language("ru")
+
+    # Добавляем элемент atom:link rel="self"
+    fg.atom_link(href=RSS_URL, rel="self")
 
     posts = soup.find_all("div", class_="entry-wrap--post")
     if not posts:
@@ -78,17 +72,26 @@ async def scrape_and_generate_rss():
         linktag = titletag.find("a", href=True) if titletag else None
         link = linktag["href"] if linktag else LJ_URL
         datetag = post.find("time", class_="item-date") or post.find("span", class_="entry-date")
-        pubdate = datetag.get("datetime") if datetag and datetag.has_attr("datetime") else datetime.now(timezone.utc).isoformat()
+        pubdate_raw = datetag.get("datetime") if datetag and datetag.has_attr("datetime") else None
+
+        if pubdate_raw:
+            dt_obj = datetime.fromisoformat(pubdate_raw)
+            pubdate_formatted = format_datetime(dt_obj)
+        else:
+            pubdate_formatted = format_datetime(datetime.now(timezone.utc))
+
         contenttag = post.find("div", class_="entry-content")
         content = contenttag.get_text(strip=True)[:500] if contenttag else ""
+
         fe = fg.add_entry()
         fe.title(title)
         fe.link(href=link)
         fe.description(content)
-        fe.published(pubdate)
+        fe.published(pubdate_formatted)
+        fe.guid(link)  # добавляем уникальный идентификатор
 
     fg.rss_file(RSS_FILENAME)
-    print(f"RSS успешно создан: {RSS_FILENAME}")
+    print(f"RSS файл создан: {RSS_FILENAME}")
 
 if __name__ == "__main__":
     asyncio.run(scrape_and_generate_rss())
