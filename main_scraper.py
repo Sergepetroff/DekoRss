@@ -46,8 +46,8 @@ async def login_and_scrape(page):
 
 async def scrape_and_generate_rss():
     async with async_playwright() as p:
-        print("Запуск браузера...")
-        browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+        print("Запуск браузера...")s
+        browser = await p.chromium.launch(headless=True) #, args=["--no-sandbox"])
 
         page = await browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36")
 
