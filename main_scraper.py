@@ -62,7 +62,7 @@ async def scrape_and_generate_rss():
     soup = BeautifulSoup(html, "html.parser")
     fg = FeedGenerator()
     fg.id(LJ_URL)
-    fg.title("LiveJournal RSS")
+    fg.title("dekodeko LiveJournal RSS")
     fg.author({"name": USERNAME})
     fg.link(href=LJ_URL, rel="alternate")
     fg.description("Auto-generated RSS from LiveJournal")
@@ -81,11 +81,16 @@ async def scrape_and_generate_rss():
         pubdate = datetag.get("datetime") if datetag and datetag.has_attr("datetime") else datetime.now(timezone.utc).isoformat()
         contenttag = post.find("div", class_="entry-content")
         content = contenttag.get_text(strip=True)[:500] if contenttag else ""
+
+        if title == "No Title" and content:
+            title = content[:20]
+
         fe = fg.add_entry()
         fe.title(title)
         fe.link(href=link)
         fe.description(content)
         fe.published(pubdate)
+
 
     fg.rss_file(RSS_FILENAME)
     print(f"RSS успешно создан: {RSS_FILENAME}")
