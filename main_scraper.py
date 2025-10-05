@@ -96,10 +96,11 @@ async def scrape_and_generate_rss():
         else:
             pubdate = None
 
-        contenttag = post.find('dd', class_='entry-text')
+        contenttag = post.find("div", class_="entry-content")
         description = contenttag.get_text(strip=True) if contenttag else ""
 
-
+        if title == "No Title" and description:
+            title = description[:40]
 
         # Добавление в RSS
         fe = fg.add_entry()
