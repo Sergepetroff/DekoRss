@@ -6,7 +6,7 @@ on:
       - main
   workflow_dispatch:
   schedule:
-    - cron: '0 6 * * *'  # запускать каждый день в 06:00 по UTC
+    - cron: '0 6 * * *'  # запуск раз в день
 
 jobs:
   build:
@@ -25,10 +25,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          pip install playwright beautifulsoup4 feedgen
           playwright install
 
-      - name: Run your script
+      - name: Run RSS generator
         run: python main_scraper.py
 
       - name: Deploy to GitHub Pages
