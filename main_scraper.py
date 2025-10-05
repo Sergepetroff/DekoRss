@@ -41,7 +41,7 @@ async def login_and_scrape(page):
 async def scrape_and_generate_rss():
     async with async_playwright() as p:
         print("Запуск браузера...")
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = await browser.new_page()
         page.on("requestfailed", lambda request: print(f"Request failed: {request.url}"))
 
