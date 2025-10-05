@@ -2,8 +2,9 @@ import asyncio
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 from feedgen.feed import FeedGenerator
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from email.utils import format_datetime
+import hashlib
 
 LOGIN_URL = "https://www.livejournal.com/login.bml"
 LJ_URL = "https://dekodeko.livejournal.com"
@@ -40,7 +41,7 @@ async def login_and_scrape(page):
     except Exception as e:
         print(f"Кнопка 18+ отсутствует или ошибка: {e}")
 
-    await page.wait_for_selector("div.entry-wrap--post", timeout=180000)
+    await page.wait_for_selector("div.entry-wrap--post", timeout=30000)
 
 async def scrape_and_generate_rss():
     async with async_playwright() as p:
@@ -74,9 +75,12 @@ async def scrape_and_generate_rss():
     if not posts:
         print("Внимание: посты не найдены!")
 
-    for post in posts:
+    # Для генерации уникальных дат, уменьшаем время на i минут, чтобы не было одинаковых pubDate
+    now = datetime.now(timezone.utc)
+
+    for i, post in enumerate(posts):
         titletag = post.find("h3", class_="item-title") or post.find("h2", class_="entry-title")
-        title = titletag.get_text(strip=True) if titletag else "No Title"
+        title = titletag.get_text(strip=True) if titletag else f"Post #{i+1}"
         linktag = titletag.find("a", href=True) if titletag else None
         link = linktag["href"] if linktag else LJ_URL
         datetag = post.find("time", class_="item-date") or post.find("span", class_="entry-date")
@@ -86,7 +90,9 @@ async def scrape_and_generate_rss():
             dt_obj = datetime.fromisoformat(pubdate_raw)
             pubdate_formatted = format_datetime(dt_obj)
         else:
-            pubdate_formatted = format_datetime(datetime.now(timezone.utc))
+            # Генерируем уникальную дату, уменьшая на i минут
+            dt_obj = now - timedelta(minutes=i)
+            pubdate_formatted = format_datetime(dt_obj)
 
         contenttag = post.find("div", class_="entry-content")
         content = contenttag.get_text(strip=True)[:500] if contenttag else ""
@@ -96,7 +102,10 @@ async def scrape_and_generate_rss():
         fe.link(href=link)
         fe.description(content)
         fe.published(pubdate_formatted)
-        fe.guid(link)
+
+        # Для guid используем хеш от ссылки, чтобы гарантировать уникальность
+        guid_hash = hashlib.sha256(link.encode('utf-8')).hexdigest()
+        fe.guid(guid_hash)
 
     fg.rss_file(RSS_FILENAME)
     print(f"RSS файл создан: {RSS_FILENAME}")
