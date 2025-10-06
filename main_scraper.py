@@ -12,8 +12,8 @@ LOGIN_URL = "https://www.livejournal.com/login.bml"
 LJ_URL = "https://dekodeko.livejournal.com"  # Страница для скрапинга после логина
 RSS_FILENAME = "dekodeko_lj_feed.xml"
 
-USERNAME = "3bepb01"
-PASSWORD = "NUJbWCajZ96!P8t"
+USERNAME = "mister_zorg_68"
+PASSWORD = "cs-4zwr,iLn&YPh"
 
 async def login_and_scrape(page):
     print("Переход на страницу логина...")
