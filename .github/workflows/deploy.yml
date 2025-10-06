@@ -3,7 +3,7 @@ name: Deploy RSS to GitHub Pages
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 6 * * *'  # запускать каждый день (06:00 UTC)
+    - cron: '0 0/2 * * *'  # запускать  ровно каждые 2 часа, в начале часа 
 
 jobs:
   build:
