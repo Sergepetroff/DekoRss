@@ -97,10 +97,16 @@ async def scrape_and_generate_rss():
             pubdate = None
 
         contenttag = post.find("div", class_="entry-content")
-        description = contenttag.get_text(strip=True) if contenttag else ""
+        title_candidate = contenttag.get_text(strip=True) if contenttag else ""
+        description = contenttag.decode_contents() if contenttag else ""
+# Вырезаем только чистый текст:
+#desc_text = BeautifulSoup(description_html, "html.parser").get_text(strip=True)
 
-        if title == "(без темы)" and description:
-            title = description[:40]
+# Берём первые 40 символов (или сколько нужно) для title:
+#title_candidate = desc_text[:40]
+
+        if title == "(без темы)" and title_candidate:
+            title = title_candidate[:40]
 
         # Добавление в RSS
         fe = fg.add_entry()
