@@ -3,14 +3,16 @@ name: Deploy RSS to GitHub Pages
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0/2 * * *'  # запускать  ровно каждые 2 часа, в начале часа 
+    - cron: '0 */2 * * *'  # каждые 2 часа
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout main branch
         uses: actions/checkout@v3
+        with:
+          ref: main
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -22,13 +24,19 @@ jobs:
           pip install playwright beautifulsoup4 feedgen
           playwright install
 
-      - name: Run RSS generator
+      - name: Run RSS generator script
         run: python main_scraper.py
+
+      # Убедимся, что сгенерированный файл точно находится в папке для публикации
+      - name: Prepare deploy folder
+        run: |
+          mkdir -p deploy_folder
+          cp dekodeko_lj_feed.xml deploy_folder/
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: .         # публиковать весь рабочий каталог
-          keep_files: true
+          publish_dir: deploy_folder  # Публикуем папку с новыми файлами
           publish_branch: gh-pages
+          keep_files: true
