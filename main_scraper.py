@@ -13,6 +13,26 @@ RSS_FILENAME = "dekodeko_lj_feed.xml"
 USERNAME = "mister_zorg_68"
 PASSWORD = "cs-4zwr,iLn&YPh"
 
+def fix_emoji_sizes(html: str, size: int = 18) -> str:
+    """
+    Проставляет явные размеры смайлам/эмодзи, чтобы они не раздувались в RSS.
+    Эвристики: по классам и по подстрокам в src.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    for img in soup.find_all("img"):
+        classes = img.get("class", [])
+        src = img.get("src", "") or ""
+        # простые эвристики для LJ-смайлов
+        is_smiley = any(k in classes for k in ("emoji", "emoticon", "smiley", "emote")) \
+                    or any(x in src for x in ("emoji", "emoticon", "smiley", "smile"))
+        if is_smiley:
+            img["width"] = str(size)
+            img["height"] = str(size)
+            style = img.get("style", "")
+            if "width" not in style and "height" not in style:
+                style = (style + f";width:{size}px;height:{size}px;vertical-align:text-bottom").lstrip(";")
+            img["style"] = style
+    return str(soup)
 async def login_and_scrape(page):
     print("Переход на страницу логина...")
     await page.goto(LOGIN_URL, timeout=120000, wait_until="domcontentloaded")
@@ -96,6 +116,7 @@ async def scrape_and_generate_rss():
         contenttag = post.find("div", class_="entry-content")
         title_candidate = contenttag.get_text(strip=True) if contenttag else "" # Вырезаем только чистый текст:
         description = contenttag.decode_contents() if contenttag else ""
+        fixed_description = fix_emoji_sizes(description, size=18)
         if title == "(без темы)" and title_candidate:
             title = title_candidate[:40]
 
@@ -103,7 +124,8 @@ async def scrape_and_generate_rss():
         fe = fg.add_entry()
         fe.title(title)
         fe.link(href=link)
-        fe.description(description)
+#        fe.description(description)
+        fe.content(fixed_description, type="CDATA")
 
         if pubdate:
             fe.pubDate(pubdate)
@@ -111,8 +133,8 @@ async def scrape_and_generate_rss():
         guid = link if link else hashlib.md5(title.encode('utf-8')).hexdigest()
         fe.guid(guid, permalink=bool(link))
 
-        print(f"Заголовок: {title},  "Ссылка: {link},  Дата публикации (форматированная): {pubdate},   GUID: {guid}")
---        print("-" * 40)
+        print(f"Заголовок: {title},  Ссылка: {link},  Дата: {pubdate},   GUID: {guid}")
+        print("-" * 40)
         fg.rss_file(RSS_FILENAME)         # После того, как все записи добавлены
         print(f"RSS файл записан: {RSS_FILENAME}")
 
