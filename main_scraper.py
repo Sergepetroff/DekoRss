@@ -1,11 +1,9 @@
-import asyncio
-import hashlib
+import asyncio, hashlib
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 from feedgen.feed import FeedGenerator
 from datetime import datetime, timezone
 from email.utils import format_datetime
-
 
 # Конфигурация
 LOGIN_URL = "https://www.livejournal.com/login.bml"
@@ -38,8 +36,7 @@ async def login_and_scrape(page):
     except Exception as e:
         print(f"Кнопка 18+ отсутствует или ошибка: {e}")
 
-    # Ждём появления постов
-    await page.wait_for_selector("div.entry-wrap--post", timeout=30000)
+    await page.wait_for_selector("div.entry-wrap--post", timeout=30000)         # Ждём появления постов
 
 async def scrape_and_generate_rss():
     async with async_playwright() as p:
@@ -97,14 +94,8 @@ async def scrape_and_generate_rss():
             pubdate = None
 
         contenttag = post.find("div", class_="entry-content")
-        title_candidate = contenttag.get_text(strip=True) if contenttag else ""
+        title_candidate = contenttag.get_text(strip=True) if contenttag else "" # Вырезаем только чистый текст:
         description = contenttag.decode_contents() if contenttag else ""
-# Вырезаем только чистый текст:
-#desc_text = BeautifulSoup(description_html, "html.parser").get_text(strip=True)
-
-# Берём первые 40 символов (или сколько нужно) для title:
-#title_candidate = desc_text[:40]
-
         if title == "(без темы)" and title_candidate:
             title = title_candidate[:40]
 
@@ -120,14 +111,9 @@ async def scrape_and_generate_rss():
         guid = link if link else hashlib.md5(title.encode('utf-8')).hexdigest()
         fe.guid(guid, permalink=bool(link))
 
-        print(f"Заголовок: {title}")
-        print(f"Ссылка: {link}")
-        print(f"Дата публикации (raw): {datetag['title'] if datetag else 'нет даты'}")
-        print(f"Дата публикации (форматированная): {pubdate}")
-        print(f"GUID: {guid}")
-        print("-" * 40)
-        # После того, как все записи добавлены
-        fg.rss_file(RSS_FILENAME)
+        print(f"Заголовок: {title},  "Ссылка: {link},  Дата публикации (форматированная): {pubdate},   GUID: {guid}")
+--        print("-" * 40)
+        fg.rss_file(RSS_FILENAME)         # После того, как все записи добавлены
         print(f"RSS файл записан: {RSS_FILENAME}")
 
 if __name__ == "__main__":
