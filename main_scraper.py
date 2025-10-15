@@ -33,6 +33,7 @@ def fix_emoji_sizes(html: str, size: int = 18) -> str:
                 style = (style + f";width:{size}px;height:{size}px;vertical-align:text-bottom").lstrip(";")
             img["style"] = style
     return str(soup)
+    
 async def login_and_scrape(page):
     print("Переход на страницу логина...")
     await page.goto(LOGIN_URL, timeout=120000, wait_until="domcontentloaded")
@@ -43,7 +44,7 @@ async def login_and_scrape(page):
     await page.wait_for_load_state("load")
 
     print(f"Переход на страницу: {LJ_URL}")
-    await page.goto(LJ_URL, timeout=60000, wait_until="load")
+    await page.goto(LJ_URL, timeout=120000, wait_until="load")
 
     print("Проверка и обход 18+...")
     try:
@@ -56,7 +57,7 @@ async def login_and_scrape(page):
     except Exception as e:
         print(f"Кнопка 18+ отсутствует или ошибка: {e}")
 
-    await page.wait_for_selector("div.entry-wrap--post", timeout=30000)         # Ждём появления постов
+    await page.wait_for_selector("div.entry-wrap--post", timeout=120000)         # Ждём появления постов
 
 async def scrape_and_generate_rss():
     async with async_playwright() as p:
