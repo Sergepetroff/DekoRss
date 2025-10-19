@@ -1,0 +1,14 @@
+# Node / Python / PHP common ignores
+.env
+*.log
+*.bak
+*.swp
+.DS_Store
+vendor/
+node_modules/
+
+# Render / Docker temp
+tmp/
+.cache/
+.idea/
+.vscode/
