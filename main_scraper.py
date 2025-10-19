@@ -9,10 +9,10 @@ load_dotenv()
 
 # Конфигурация
 LOGIN_URL = "https://www.livejournal.com/login.bml"
-LJ_URL = "https://dekodeko.livejournal.com"  # Страница для скрапинга после логина
+#LJ_URL = "https://dekodeko.livejournal.com"  
 RSS_FILENAME = "dekodeko_lj_feed.xml"
 
-LJ_URL = os.getenv("LJ_URL")
+LJ_URL = os.getenv("LJ_URL")                # Страница для скрапинга после логина
 LJ_USERNAME = os.getenv("LJ_USERNAME")
 LJ_PASSWORD = os.getenv("LJ_PASSWORD")
 
@@ -115,8 +115,10 @@ async def scrape_and_generate_rss():
         # Дата публикации
         datetag = post.find('abbr', class_='updated')
         if datetag and datetag.has_attr('title'):
-            dt_obj = datetime.fromisoformat(datetag['title'])
+            dt_obj = datetime.fromisoformat(datetag['title'].replace('Z', '+00:00'))  # поддержка Z
+#            pubdate = dt_obj.strftime("%Y-%m-%d %H:%M")
             pubdate = format_datetime(dt_obj)
+
         else:
             pubdate = None
 
@@ -140,10 +142,11 @@ async def scrape_and_generate_rss():
         guid = link if link else hashlib.md5(title.encode('utf-8')).hexdigest()
         fe.guid(guid, permalink=bool(link))
 
-        print(f"Заголовок: {title},  Ссылка: {link},  Дата: {pubdate},   GUID: {guid}")
-        print("-" * 40)
+        print(f"| {title}| {pubdate}| {guid}")
         fg.rss_file(RSS_FILENAME)         # После того, как все записи добавлены
-        print(f"RSS файл записан: {RSS_FILENAME}")
+
+    print("-" * 40)
+    print(f"RSS файл записан: {RSS_FILENAME}")
 
 if __name__ == "__main__":
     asyncio.run(scrape_and_generate_rss())
