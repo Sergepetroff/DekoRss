@@ -26,6 +26,7 @@ jobs:
         env:
           LJ_USERNAME: ${{ secrets.LJ_USERNAME }}
           LJ_PASSWORD: ${{ secrets.LJ_PASSWORD }}      
+          LJ_URL:      ${{ secrets.LJ_URL }}      
         run: |
           mkdir -p docs
           python main_scraper.py

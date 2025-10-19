@@ -12,6 +12,7 @@ LOGIN_URL = "https://www.livejournal.com/login.bml"
 LJ_URL = "https://dekodeko.livejournal.com"  # Страница для скрапинга после логина
 RSS_FILENAME = "dekodeko_lj_feed.xml"
 
+LJ_URL = os.getenv("LJ_URL")
 LJ_USERNAME = os.getenv("LJ_USERNAME")
 LJ_PASSWORD = os.getenv("LJ_PASSWORD")
 
