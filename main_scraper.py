@@ -14,8 +14,6 @@ RSS_FILENAME = "dekodeko_lj_feed.xml"
 
 LJ_USERNAME = os.getenv("LJ_USERNAME")
 LJ_PASSWORD = os.getenv("LJ_PASSWORD")
-print("LJ_USERNAME:", LJ_USERNAME)
-print("LJ_PASSWORD:", LJ_PASSWORD)
 
 if not LJ_USERNAME or not LJ_PASSWORD:
     raise ValueError(f"LJ_USERNAME or LJ_PASSWORD not set! LJ_USERNAME={LJ_USERNAME}, LJ_PASSWORD={LJ_PASSWORD}")
@@ -109,7 +107,7 @@ async def scrape_and_generate_rss():
         linktag = titletag.find('a', href=True) if titletag else None
         link = linktag['href'] if linktag else None
         if link and link.startswith('/'):
-            link = "https://dekodeko.livejournal.com" + link
+            link = LJ_URL + link
         if not link:
             link = LJ_URL
 
