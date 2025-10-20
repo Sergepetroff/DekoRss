@@ -18,10 +18,11 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 ## Переменные окружения (.env)
-
+```bash
 LJ_URL=https://username.livejournal.com
 LJ_USERNAME=your_login
 LJ_PASSWORD=your_password
+```
 
 ## Автодеплой (GitHub Actions)
 
