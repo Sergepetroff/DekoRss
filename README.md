@@ -1,0 +1,18 @@
+# LiveJournal RSS Scraper  
+Скрипт автоматизирует вход в LiveJournal и создает RSS-ленту для указанного пользователя или блога.  
+
+## Функциональность  
+- Авторизация через Playwright (в том числе 18+ страницы)  
+- Скрапинг постов с заданного URL  
+- Очистка HTML и корректировка размеров эмодзи  
+- Генерация RSS-файла (`dekodeko_lj_feed.xml`)  
+- Поддержка русскоязычных блогов  
+
+## Требования  
+- Python ≥ 3.10  
+- Playwright, BeautifulSoup4, Feedgen, python-dotenv  
+
+## Установка  
+```bash
+pip install -r requirements.txt
+playwright install chromium
