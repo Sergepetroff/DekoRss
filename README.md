@@ -16,7 +16,7 @@
 ```bash
 pip install -r requirements.txt
 playwright install chromium
-
+```
 ## Переменные окружения (.env)
 
 LJ_URL=https://username.livejournal.com
