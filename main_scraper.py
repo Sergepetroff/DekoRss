@@ -5,6 +5,7 @@ from feedgen.feed import FeedGenerator
 from datetime import datetime, timezone
 from email.utils import format_datetime
 from dotenv import load_dotenv
+from tone_analysis import analyze_text_tone, apply_tone_style
 load_dotenv()
 
 # Конфигурация
@@ -141,8 +142,11 @@ async def scrape_and_generate_rss():
 
         contenttag = post.find("div", class_="entry-content")
         title_candidate = contenttag.get_text(strip=True) if contenttag else "" # Вырезаем только чистый текст:
+        content_text = contenttag.get_text(" ", strip=True) if contenttag else ""
         description = contenttag.decode_contents() if contenttag else ""
         fixed_description = fix_emoji_sizes(description, size=18)
+        tone = analyze_text_tone(content_text)
+        fixed_description = apply_tone_style(fixed_description, tone)
         post_tags = extract_post_tags(post)
         matched_excluded_tags = [
             tag for tag in post_tags if tag.casefold() in LJ_EXCLUDED_TAGS
