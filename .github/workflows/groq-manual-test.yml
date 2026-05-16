@@ -20,7 +20,7 @@ jobs:
   run-manual-tone-test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout repository code (копирует репозиторий в runner)
         uses: actions/checkout@v6
 
       - name: Set up Python
