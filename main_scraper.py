@@ -15,14 +15,16 @@ RSS_FILENAME = "dekodeko_lj_feed.xml"
 LJ_URL = os.getenv("LJ_URL")                # Страница для скрапинга после логина
 LJ_USERNAME = os.getenv("LJ_USERNAME")
 LJ_PASSWORD = os.getenv("LJ_PASSWORD")
+PLAYWRIGHT_HEADLESS = (os.getenv("PLAYWRIGHT_HEADLESS", "true").strip().lower()
+                       not in {"0", "false", "no", "off"})
 LJ_EXCLUDED_TAGS = {
     tag.strip().casefold()
     for tag in (os.getenv("LJ_EXCLUDED_TAGS") or "").split(",")
     if tag.strip()
 }
 
-if not LJ_USERNAME or not LJ_PASSWORD:
-    raise ValueError(f"LJ_USERNAME or LJ_PASSWORD not set! LJ_USERNAME={LJ_USERNAME}, LJ_PASSWORD={LJ_PASSWORD}")
+if not LJ_URL or not LJ_USERNAME or not LJ_PASSWORD:
+    raise ValueError("LJ_URL, LJ_USERNAME and LJ_PASSWORD must be set")
 
 
 def extract_post_tags(post) -> list[str]:
@@ -85,7 +87,7 @@ async def login_and_scrape(page):
 async def scrape_and_generate_rss():
     async with async_playwright() as p:
         print("Запуск браузера...")
-        browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+        browser = await p.chromium.launch(headless=PLAYWRIGHT_HEADLESS, args=["--no-sandbox"])
         page = await browser.new_page()
         page.on("requestfailed", lambda request: print(f"Request failed: {request.url}"))
 

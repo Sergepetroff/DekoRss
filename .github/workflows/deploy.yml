@@ -1,7 +1,13 @@
-name: Generate and Publish RSS
+name: Generate, Preview and Publish RSS
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Deploy generated RSS to GitHub Pages"
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '0 0/6 * * *'  # каждые 6 часов
 
@@ -47,9 +53,17 @@ jobs:
         with:
           path: docs
 
+      - name: Upload preview artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rss-preview
+          path: docs/dekodeko_lj_feed.xml
+
   deploy:
     runs-on: ubuntu-latest
     needs: build
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.publish == 'true'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
