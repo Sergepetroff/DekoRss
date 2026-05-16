@@ -31,6 +31,8 @@ LJ_EXCLUDED_TAGS=видео,#shorts
 
 `deploy.yml` автоматически генерирует и публикует RSS-файл через GitHub Pages artifact.
 
+В окне шагов GitHub Actions `Checkout` означает шаг `actions/checkout`: он просто копирует код репозитория в рабочую папку runner, чтобы последующие шаги могли запускать скрипты.
+
 Сгенерированный файл `docs/dekodeko_lj_feed.xml` больше не коммитится обратно в `main`, поэтому он не должен создавать постоянные конфликты при merge/rebase.
 
 Для работы workflow в настройках репозитория GitHub Pages должен использовать источник `GitHub Actions`.
