@@ -36,6 +36,7 @@ jobs:
           LJ_USERNAME: ${{ secrets.LJ_USERNAME }}
           LJ_PASSWORD: ${{ secrets.LJ_PASSWORD }}      
           LJ_URL:      ${{ secrets.LJ_URL }}      
+          LJ_EXCLUDED_TAGS: ${{ secrets.LJ_EXCLUDED_TAGS }}
         run: |
           mkdir -p docs
           python main_scraper.py
