@@ -143,7 +143,7 @@ async def scrape_and_generate_rss():
         title_candidate = contenttag.get_text(strip=True) if contenttag else "" # Вырезаем только чистый текст:
         description = contenttag.decode_contents() if contenttag else ""
         fixed_description = fix_emoji_sizes(description, size=18)
-        post_tags = extract_post_tags(contenttag) if contenttag else []
+        post_tags = extract_post_tags(post)
         matched_excluded_tags = [
             tag for tag in post_tags if tag.casefold() in LJ_EXCLUDED_TAGS
         ]

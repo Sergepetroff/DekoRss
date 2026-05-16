@@ -29,4 +29,8 @@ LJ_EXCLUDED_TAGS=видео,#shorts
 
 ## Автодеплой (GitHub Actions)
 
-`deploy.yml` автоматически публикует сгенерированный RSS-файл при каждом обновлении.
+`deploy.yml` автоматически генерирует и публикует RSS-файл через GitHub Pages artifact.
+
+Сгенерированный файл `docs/dekodeko_lj_feed.xml` больше не коммитится обратно в `main`, поэтому он не должен создавать постоянные конфликты при merge/rebase.
+
+Для работы workflow в настройках репозитория GitHub Pages должен использовать источник `GitHub Actions`.
