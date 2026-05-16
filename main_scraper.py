@@ -1,4 +1,4 @@
-import asyncio, hashlib, os
+import asyncio, hashlib, os, re
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 from feedgen.feed import FeedGenerator
@@ -56,6 +56,89 @@ def fix_emoji_sizes(html: str, size: int = 18) -> str:
                 style = (style + f";width:{size}px;height:{size}px;vertical-align:text-bottom").lstrip(";")
             img["style"] = style
     return str(soup)
+
+
+def normalize_rss_html(html: str) -> str:
+    """
+    Упрощает HTML из LJ до более чистого и предсказуемого RSS-контента.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+
+    for tag in soup.find_all(["script", "style", "svg", "form", "input", "button", "textarea"]):
+        tag.decompose()
+
+    for tag_block in soup.find_all("div", class_="ljtags"):
+        tag_block.decompose()
+
+    for iframe in soup.find_all("iframe"):
+        src = iframe.get("src", "") or iframe.get("data-src", "")
+        if src:
+            replacement = soup.new_tag("p")
+            link = soup.new_tag("a", href=src)
+            link.string = "Open embedded media"
+            replacement.append(link)
+            iframe.replace_with(replacement)
+        else:
+            iframe.decompose()
+
+    for tag in list(soup.find_all()):
+        if tag.name in {"html", "body"}:
+            tag.unwrap()
+            continue
+
+        if tag.name == "div":
+            has_block_children = any(
+                getattr(child, "name", None) in {"p", "div", "ul", "ol", "li", "blockquote", "pre"}
+                for child in tag.children
+            )
+            if has_block_children:
+                tag.unwrap()
+            else:
+                tag.name = "p"
+            continue
+
+        if tag.name in {"span", "font", "section", "article", "header", "footer", "ytd-expander"}:
+            tag.unwrap()
+            continue
+
+        if "-" in tag.name and tag.name not in {"lj-embed"}:
+            tag.unwrap()
+
+    allowed_attrs = {
+        "a": {"href", "title"},
+        "img": {"src", "alt", "title", "width", "height", "style"},
+    }
+    allowed_tags = {
+        "a", "b", "blockquote", "br", "code", "em", "i", "img", "li", "ol", "p", "pre", "strong", "sub", "sup", "u", "ul"
+    }
+
+    for tag in list(soup.find_all()):
+        if tag.name not in allowed_tags:
+            tag.unwrap()
+            continue
+
+        keep_attrs = allowed_attrs.get(tag.name, set())
+        attrs_to_remove = [attr_name for attr_name in tag.attrs if attr_name not in keep_attrs]
+        for attr_name in attrs_to_remove:
+            del tag[attr_name]
+
+        if tag.name == "a":
+            href = (tag.get("href") or "").strip()
+            if not href:
+                tag.unwrap()
+            elif href.startswith("//"):
+                tag["href"] = f"https:{href}"
+
+    normalized_html = str(soup)
+    normalized_html = re.sub(r"(?:\s*<br\s*/?>\s*){3,}", "<br/><br/>", normalized_html, flags=re.IGNORECASE)
+    normalized_html = re.sub(r"<p>\s*</p>", "", normalized_html, flags=re.IGNORECASE)
+
+    normalized_soup = BeautifulSoup(normalized_html, "html.parser")
+    for paragraph in normalized_soup.find_all("p"):
+        if not paragraph.get_text(" ", strip=True) and not paragraph.find("img"):
+            paragraph.decompose()
+
+    return str(normalized_soup)
     
 async def login_and_scrape(page):
     print("Переход на страницу логина...")
@@ -142,7 +225,8 @@ async def scrape_and_generate_rss():
         contenttag = post.find("div", class_="entry-content")
         title_candidate = contenttag.get_text(strip=True) if contenttag else "" # Вырезаем только чистый текст:
         description = contenttag.decode_contents() if contenttag else ""
-        fixed_description = fix_emoji_sizes(description, size=18)
+        normalized_description = normalize_rss_html(description)
+        fixed_description = fix_emoji_sizes(normalized_description, size=18)
         post_tags = extract_post_tags(post)
         matched_excluded_tags = [
             tag for tag in post_tags if tag.casefold() in LJ_EXCLUDED_TAGS
