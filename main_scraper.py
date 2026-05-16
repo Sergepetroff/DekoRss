@@ -1,6 +1,6 @@
 import asyncio, hashlib, os, re
 from playwright.async_api import async_playwright
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString
 from feedgen.feed import FeedGenerator
 from datetime import datetime, timezone
 from email.utils import format_datetime
@@ -55,7 +55,53 @@ def fix_emoji_sizes(html: str, size: int = 18) -> str:
             if "width" not in style and "height" not in style:
                 style = (style + f";width:{size}px;height:{size}px;vertical-align:text-bottom").lstrip(";")
             img["style"] = style
+        elif img.has_attr("style"):
+            del img["style"]
     return str(soup)
+
+
+def wrap_loose_nodes_in_paragraphs(soup: BeautifulSoup) -> None:
+    container = soup.body if soup.body else soup
+    block_tags = {"blockquote", "div", "li", "ol", "p", "pre", "ul"}
+    inline_buffer = []
+    insert_before_node = None
+
+    def flush_inline_buffer() -> None:
+        nonlocal inline_buffer, insert_before_node
+        if not inline_buffer:
+            return
+
+        paragraph = soup.new_tag("p")
+        anchor = insert_before_node
+        if anchor is None:
+            inline_buffer = []
+            return
+
+        anchor.insert_before(paragraph)
+        for node in inline_buffer:
+            paragraph.append(node.extract())
+
+        if not paragraph.get_text(" ", strip=True) and not paragraph.find("img"):
+            paragraph.decompose()
+
+        inline_buffer = []
+        insert_before_node = None
+
+    for child in list(container.contents):
+        is_inline_text = isinstance(child, NavigableString) and bool(str(child).strip())
+        is_inline_tag = getattr(child, "name", None) not in block_tags if not isinstance(child, NavigableString) else False
+
+        if is_inline_text or is_inline_tag:
+            if insert_before_node is None:
+                insert_before_node = child
+            inline_buffer.append(child)
+            continue
+
+        flush_inline_buffer()
+        if isinstance(child, NavigableString):
+            child.extract()
+
+    flush_inline_buffer()
 
 
 def normalize_rss_html(html: str) -> str:
@@ -106,7 +152,7 @@ def normalize_rss_html(html: str) -> str:
 
     allowed_attrs = {
         "a": {"href", "title"},
-        "img": {"src", "alt", "title", "width", "height", "style"},
+        "img": {"src", "alt", "title", "width", "height"},
     }
     allowed_tags = {
         "a", "b", "blockquote", "br", "code", "em", "i", "img", "li", "ol", "p", "pre", "strong", "sub", "sup", "u", "ul"
@@ -128,6 +174,17 @@ def normalize_rss_html(html: str) -> str:
                 tag.unwrap()
             elif href.startswith("//"):
                 tag["href"] = f"https:{href}"
+            elif href.startswith("/") and LJ_URL:
+                tag["href"] = f"{LJ_URL.rstrip('/')}{href}"
+
+        if tag.name == "img":
+            src = (tag.get("src") or "").strip()
+            if not src:
+                tag.decompose()
+            elif src.startswith("//"):
+                tag["src"] = f"https:{src}"
+
+    wrap_loose_nodes_in_paragraphs(soup)
 
     normalized_html = str(soup)
     normalized_html = re.sub(r"(?:\s*<br\s*/?>\s*){3,}", "<br/><br/>", normalized_html, flags=re.IGNORECASE)
