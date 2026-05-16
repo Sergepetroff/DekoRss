@@ -2,6 +2,8 @@ import json
 import os
 import re
 import time
+from functools import lru_cache
+from pathlib import Path
 from urllib import error, request
 
 from dotenv import load_dotenv
@@ -10,6 +12,40 @@ load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+TONE_PROMPTS_FILE = Path(
+    os.getenv("TONE_PROMPTS_FILE")
+    or (Path(__file__).resolve().parent / "docs" / "tone_prompts.md")
+)
+
+
+@lru_cache(maxsize=1)
+def _load_tone_prompt_sections() -> dict[str, str]:
+    prompt_text = TONE_PROMPTS_FILE.read_text(encoding="utf-8")
+    sections: dict[str, list[str]] = {}
+    current_section: str | None = None
+
+    for line in prompt_text.splitlines():
+        section_match = re.match(r"^##\s+([a-z_]+)\s*$", line.strip())
+        if section_match:
+            current_section = section_match.group(1)
+            sections[current_section] = []
+            continue
+
+        if current_section is not None:
+            sections[current_section].append(line)
+
+    missing_sections = {"scale", "single", "batch"} - set(sections)
+    if missing_sections:
+        missing_names = ", ".join(sorted(missing_sections))
+        raise ValueError(f"Missing prompt sections in {TONE_PROMPTS_FILE}: {missing_names}")
+
+    return {name: "\n".join(lines).strip() for name, lines in sections.items()}
+
+
+def _get_tone_prompt(section_name: str) -> str:
+    sections = _load_tone_prompt_sections()
+    prompt = sections[section_name]
+    return prompt.replace("{{scale}}", sections["scale"])
 
 
 def _extract_retry_delay(http_error: error.HTTPError, response_body: str) -> float:
@@ -27,9 +63,9 @@ def _extract_retry_delay(http_error: error.HTTPError, response_body: str) -> flo
     return 2.0
 
 
-def clamp_tone_score(value) -> int:
+def clamp_tone_value(value) -> int:
     try:
-        return max(0, min(2, int(value)))
+        return max(-2, min(2, int(value)))
     except (TypeError, ValueError):
         return 0
 
@@ -120,17 +156,15 @@ def analyze_text_tone(
     if not api_key or not text.strip():
         return None
 
+    single_prompt = _get_tone_prompt("single")
+
     payload = {
         "model": model,
         "temperature": 0,
         "messages": [
             {
                 "role": "system",
-                "content": (
-                    "Ты анализируешь тон текста. Верни только JSON без пояснений в формате: "
-                    '{"pro_male": 0..2, "pro_female": 0..2}. '
-                    "0 — нейтрально, 1 — умеренно, 2 — выраженно."
-                ),
+                "content": single_prompt,
             },
             {"role": "user", "content": text[:4000]},
         ],
@@ -144,10 +178,7 @@ def analyze_text_tone(
         return None
 
     tone_data = json.loads(json_payload)
-    return {
-        "pro_male": clamp_tone_score(tone_data.get("pro_male")),
-        "pro_female": clamp_tone_score(tone_data.get("pro_female")),
-    }
+    return {"tone": clamp_tone_value(tone_data.get("tone"))}
 
 
 def analyze_text_tones(
@@ -161,6 +192,8 @@ def analyze_text_tones(
     normalized_texts = [text.strip() for text in texts]
     if not api_key:
         return [None for _ in normalized_texts]
+
+    batch_prompt = _get_tone_prompt("batch")
 
     indexed_texts = [(index, text) for index, text in enumerate(normalized_texts) if text]
     results: list[dict | None] = [None for _ in normalized_texts]
@@ -179,13 +212,7 @@ def analyze_text_tones(
             "messages": [
                 {
                     "role": "system",
-                    "content": (
-                        "Ты анализируешь тон нескольких абзацев. "
-                        "Верни только JSON-массив без пояснений. "
-                        "Для каждого входного абзаца верни объект в том же порядке в формате "
-                        '[{"pro_male": 0..2, "pro_female": 0..2}]. '
-                        "Если текст нейтральный, используй 0."
-                    ),
+                    "content": batch_prompt,
                 },
                 {"role": "user", "content": "\n\n".join(prompt_lines)},
             ],
@@ -207,10 +234,7 @@ def analyze_text_tones(
             source_index = chunk_pairs[chunk_position][0]
             if not isinstance(tone_item, dict):
                 continue
-            results[source_index] = {
-                "pro_male": clamp_tone_score(tone_item.get("pro_male")),
-                "pro_female": clamp_tone_score(tone_item.get("pro_female")),
-            }
+            results[source_index] = {"tone": clamp_tone_value(tone_item.get("tone"))}
 
     return results
 
@@ -218,7 +242,7 @@ def analyze_text_tones(
 def apply_tone_style(html: str, tone: dict | None) -> str:
     if not tone:
         return html
-    difference = abs(tone["pro_male"] - tone["pro_female"])
-    opacity = max(0.70, 1 - (difference * 0.15))
-    tone_info = f"Tone score: M{tone['pro_male']}/F{tone['pro_female']}"
+    intensity = abs(tone["tone"])
+    opacity = max(0.70, 1 - (intensity * 0.10))
+    tone_info = f"Tone score: {tone['tone']:+d}"
     return f'<div style="opacity:{opacity:.2f}"><p><strong>{tone_info}</strong></p>{html}</div>'

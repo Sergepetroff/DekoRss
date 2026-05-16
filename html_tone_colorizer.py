@@ -12,6 +12,7 @@ from tone_analysis import analyze_text_tone, analyze_text_tones
 
 ToneAnalyzer = Callable[[str], dict | None]
 ToneBatchAnalyzer = Callable[[list[str]], list[dict | None]]
+MISSING_TONE = object()
 PARAGRAPH_RE = re.compile(r"<p\b(?P<attrs>[^>]*)>(?P<inner>.*?)</p>", flags=re.I | re.S)
 TONE_BADGE_RE = re.compile(
     r"\s*<span\b[^>]*class=(['\"])"
@@ -58,18 +59,18 @@ def _paragraph_style(tone: dict | None) -> tuple[str, str]:
             "Tone unavailable",
         )
 
-    pro_male = tone["pro_male"]
-    pro_female = tone["pro_female"]
-    if pro_male > pro_female:
+    tone_value = tone["tone"]
+    intensity = abs(tone_value)
+    if tone_value > 0:
         color_map = {1: ("#dbeafe", "#2563eb"), 2: ("#bfdbfe", "#1d4ed8")}
-        background, border = color_map.get(pro_male, ("#eff6ff", "#60a5fa"))
-    elif pro_female > pro_male:
+        background, border = color_map.get(intensity, ("#eff6ff", "#60a5fa"))
+    elif tone_value < 0:
         color_map = {1: ("#fce7f3", "#db2777"), 2: ("#fbcfe8", "#be185d")}
-        background, border = color_map.get(pro_female, ("#fdf2f8", "#f472b6"))
+        background, border = color_map.get(intensity, ("#fdf2f8", "#f472b6"))
     else:
         background, border = ("#fef3c7", "#d97706")
 
-    label = f"Tone M{pro_male}/F{pro_female}"
+    label = f"Tone {tone_value:+d}"
     return (base_style + f"background:{background};border-left:4px solid {border};", label)
 
 
@@ -85,7 +86,7 @@ def _remove_attr(attrs: str, attr_name: str) -> str:
 
 def _build_paragraph_attrs(attrs: str, style: str, tone: dict | None) -> str:
     cleaned_attrs = attrs
-    for attr_name in ("style", "data-tone-male", "data-tone-female"):
+    for attr_name in ("style", "data-tone"):
         cleaned_attrs = _remove_attr(cleaned_attrs, attr_name)
 
     cleaned_attrs = cleaned_attrs.strip()
@@ -94,18 +95,10 @@ def _build_paragraph_attrs(attrs: str, style: str, tone: dict | None) -> str:
         parts.append(cleaned_attrs)
     parts.append(f'style="{style}"')
     if tone:
-        parts.append(f'data-tone-male="{tone["pro_male"]}"')
-        parts.append(f'data-tone-female="{tone["pro_female"]}"')
+        parts.append(f'data-tone="{tone["tone"]}"')
     else:
-        parts.append('data-tone-male=""')
-        parts.append('data-tone-female=""')
+        parts.append('data-tone=""')
     return " " + " ".join(parts)
-
-
-def _tone_attrs(tone: dict | None) -> str:
-    if not tone:
-        return ' data-tone-male="" data-tone-female=""'
-    return f' data-tone-male="{tone["pro_male"]}" data-tone-female="{tone["pro_female"]}"'
 
 
 def _split_plain_text_paragraphs(text: str) -> list[str]:
@@ -128,6 +121,10 @@ def _build_badge_html(label: str) -> str:
     return f'<span class="tone-badge" style="{badge_style}">{label}</span> '
 
 
+def _render_raw_paragraph(entry: ParagraphEntry) -> str:
+    return f"<p{entry.attrs}>{entry.inner_html}</p>" if entry.attrs else f"<p>{entry.inner_html}</p>"
+
+
 def _render_colored_paragraph(inner_html: str, tone: dict | None, attrs: str = "") -> str:
     paragraph_style, label = _paragraph_style(tone)
     paragraph_attrs = _build_paragraph_attrs(attrs, paragraph_style, tone)
@@ -147,6 +144,26 @@ def _render_document(paragraphs_html: list[str]) -> str:
         "  </body>\n"
         "</html>\n"
     )
+
+
+def _chunk_entries(entries: list[ParagraphEntry], max_items: int = 8, max_chars: int = 12000) -> list[list[ParagraphEntry]]:
+    chunks: list[list[ParagraphEntry]] = []
+    current_chunk: list[ParagraphEntry] = []
+    current_chars = 0
+
+    for entry in entries:
+        entry_chars = min(len(entry.text), 4000)
+        if current_chunk and (len(current_chunk) >= max_items or current_chars + entry_chars > max_chars):
+            chunks.append(current_chunk)
+            current_chunk = []
+            current_chars = 0
+        current_chunk.append(entry)
+        current_chars += entry_chars
+
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return chunks
 
 
 def _extract_plain_text_entries(text: str) -> list[ParagraphEntry]:
@@ -179,6 +196,34 @@ def _resolve_tones(
     return analyze_text_tones(texts)
 
 
+def _render_plain_text_with_tones(entries: list[ParagraphEntry], tones: list[dict | None | object]) -> str:
+    paragraphs_html: list[str] = []
+    for entry, tone in zip(entries, tones):
+        if tone is MISSING_TONE:
+            paragraphs_html.append(_render_raw_paragraph(entry))
+            continue
+        paragraphs_html.append(_render_colored_paragraph(entry.inner_html, tone))
+    return _render_document(paragraphs_html)
+
+
+def _render_html_with_tones(html: str, tones: list[dict | None | object]) -> str:
+    tone_iter = iter(tones)
+
+    def replace_paragraph(match: re.Match[str]) -> str:
+        attrs = match.group("attrs")
+        inner_html = TONE_BADGE_RE.sub("", match.group("inner"))
+        text = _strip_html_tags(inner_html)
+        if not text:
+            return match.group(0)
+
+        tone = next(tone_iter, MISSING_TONE)
+        if tone is MISSING_TONE:
+            return f"<p{attrs}>{inner_html}</p>" if attrs else f"<p>{inner_html}</p>"
+        return _render_colored_paragraph(inner_html, tone, attrs)
+
+    return PARAGRAPH_RE.sub(replace_paragraph, html)
+
+
 def colorize_paragraphs(
     html: str,
     analyzer: ToneAnalyzer | None = None,
@@ -189,26 +234,11 @@ def colorize_paragraphs(
             return html
         entries = _extract_plain_text_entries(html)
         tones = _resolve_tones([entry.text for entry in entries], analyzer=analyzer, batch_analyzer=batch_analyzer)
-        return _render_document([
-            _render_colored_paragraph(entry.inner_html, tone)
-            for entry, tone in zip(entries, tones)
-        ])
+        return _render_plain_text_with_tones(entries, list(tones))
 
     entries = _extract_html_entries(html)
     tones = _resolve_tones([entry.text for entry in entries], analyzer=analyzer, batch_analyzer=batch_analyzer)
-    tone_iter = iter(tones)
-
-    def replace_paragraph(match: re.Match[str]) -> str:
-        attrs = match.group("attrs")
-        inner_html = TONE_BADGE_RE.sub("", match.group("inner"))
-        text = _strip_html_tags(inner_html)
-        if not text:
-            return match.group(0)
-
-        tone = next(tone_iter, None)
-        return _render_colored_paragraph(inner_html, tone, attrs)
-
-    return PARAGRAPH_RE.sub(replace_paragraph, html)
+    return _render_html_with_tones(html, list(tones))
 
 
 def colorize_html_file(
@@ -218,16 +248,41 @@ def colorize_html_file(
     batch_analyzer: ToneBatchAnalyzer | None = None,
 ) -> ColorizeResult:
     html = read_html_file(input_path)
-    entries = _extract_html_entries(html) if PARAGRAPH_RE.search(html) else _extract_plain_text_entries(html)
-    tones = _resolve_tones([entry.text for entry in entries], analyzer=analyzer, batch_analyzer=batch_analyzer)
-    scored_paragraphs = sum(1 for tone in tones if tone is not None)
-
-    colored_html = colorize_paragraphs(html, analyzer=analyzer, batch_analyzer=batch_analyzer)
     target_path = Path(output_path) if output_path else Path(input_path)
-    write_html_file(target_path, colored_html)
+    is_html_input = bool(PARAGRAPH_RE.search(html))
+    entries = _extract_html_entries(html) if is_html_input else _extract_plain_text_entries(html)
+    tones: list[dict | None | object] = [MISSING_TONE for _ in entries]
+
+    if not entries:
+        write_html_file(target_path, html)
+        return ColorizeResult(
+            output_path=target_path,
+            total_paragraphs=0,
+            scored_paragraphs=0,
+            failed_paragraphs=0,
+        )
+
+    chunks = _chunk_entries(entries)
+    offset = 0
+    for chunk in chunks:
+        chunk_texts = [entry.text for entry in chunk]
+        chunk_tones = _resolve_tones(chunk_texts, analyzer=analyzer, batch_analyzer=batch_analyzer)
+        for index, tone in enumerate(chunk_tones):
+            tones[offset + index] = tone
+        offset += len(chunk)
+
+        checkpoint_html = (
+            _render_html_with_tones(html, tones)
+            if is_html_input
+            else _render_plain_text_with_tones(entries, tones)
+        )
+        write_html_file(target_path, checkpoint_html)
+
+    scored_paragraphs = sum(1 for tone in tones if tone is not MISSING_TONE and tone is not None)
+    failed_paragraphs = sum(1 for tone in tones if tone is None)
     return ColorizeResult(
         output_path=target_path,
         total_paragraphs=len(entries),
         scored_paragraphs=scored_paragraphs,
-        failed_paragraphs=max(0, len(entries) - scored_paragraphs),
+        failed_paragraphs=failed_paragraphs,
     )
