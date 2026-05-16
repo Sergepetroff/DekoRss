@@ -1,0 +1,36 @@
+name: GroQ Manual Tone Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      paragraph:
+        description: "Paragraph text for manual tone evaluation"
+        required: true
+        type: string
+      model:
+        description: "GroQ model (optional)"
+        required: false
+        default: "llama-3.1-8b-instant"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  run-manual-tone-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Run GroQ manual tone evaluation
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_MODEL: ${{ github.event.inputs.model }}
+        run: |
+          python groq_manual_test.py "${{ github.event.inputs.paragraph }}"
