@@ -15,9 +15,26 @@ RSS_FILENAME = "dekodeko_lj_feed.xml"
 LJ_URL = os.getenv("LJ_URL")                # Страница для скрапинга после логина
 LJ_USERNAME = os.getenv("LJ_USERNAME")
 LJ_PASSWORD = os.getenv("LJ_PASSWORD")
+LJ_EXCLUDED_TAGS = {
+    tag.strip().casefold()
+    for tag in (os.getenv("LJ_EXCLUDED_TAGS") or "").split(",")
+    if tag.strip()
+}
 
 if not LJ_USERNAME or not LJ_PASSWORD:
     raise ValueError(f"LJ_USERNAME or LJ_PASSWORD not set! LJ_USERNAME={LJ_USERNAME}, LJ_PASSWORD={LJ_PASSWORD}")
+
+
+def extract_post_tags(post) -> list[str]:
+    tag_container = post.find("div", class_="ljtags")
+    if not tag_container:
+        return []
+
+    return [
+        tag_link.get_text(strip=True)
+        for tag_link in tag_container.find_all("a", rel=lambda value: value and "tag" in value)
+        if tag_link.get_text(strip=True)
+    ]
 
 def fix_emoji_sizes(html: str, size: int = 18) -> str:
     """
@@ -126,6 +143,15 @@ async def scrape_and_generate_rss():
         title_candidate = contenttag.get_text(strip=True) if contenttag else "" # Вырезаем только чистый текст:
         description = contenttag.decode_contents() if contenttag else ""
         fixed_description = fix_emoji_sizes(description, size=18)
+        post_tags = extract_post_tags(contenttag) if contenttag else []
+        matched_excluded_tags = [
+            tag for tag in post_tags if tag.casefold() in LJ_EXCLUDED_TAGS
+        ]
+
+        if matched_excluded_tags:
+            print(f"- Пропускаю пост '{title}' из-за тегов: {', '.join(matched_excluded_tags)}")
+            continue
+
         if title == "(без темы)" and title_candidate:
             title = title_candidate[:40]
 

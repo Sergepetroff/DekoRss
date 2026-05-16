@@ -22,7 +22,10 @@ playwright install chromium
 LJ_URL=https://username.livejournal.com
 LJ_USERNAME=your_login
 LJ_PASSWORD=your_password
+LJ_EXCLUDED_TAGS=видео,#shorts
 ```
+
+`LJ_EXCLUDED_TAGS` опционален. Если задан, скрипт пропускает все посты, у которых есть хотя бы один тег из списка. Значения перечисляются через запятую, сравнение идет без учета регистра и лишних пробелов.
 
 ## Автодеплой (GitHub Actions)
 
