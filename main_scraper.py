@@ -198,13 +198,21 @@ def normalize_rss_html(html: str) -> str:
     return str(normalized_soup)
     
 async def login_and_scrape(page):
-    print("Переход на страницу логина...")
-    await page.goto(LOGIN_URL, timeout=120000, wait_until="domcontentloaded")
-    await page.fill('input[name="user"]', LJ_USERNAME)
-    await page.fill('input[name="password"]', LJ_PASSWORD, timeout=90000)  # 90s
-    print("Отправляю форму логина...")
-    await page.click('button[type="submit"]')
-    await page.wait_for_load_state("load")
+    # Установка cookie 18+ для гарантированного обхода плашки Adult Content Notice
+    await page.context.add_cookies([
+        {"name": "adult_explicit", "value": "1", "domain": ".livejournal.com", "path": "/"}
+    ])
+
+    try:
+        print("Переход на страницу логина...")
+        await page.goto(LOGIN_URL, timeout=120000, wait_until="domcontentloaded")
+        await page.fill('input[name="user"]', LJ_USERNAME)
+        await page.fill('input[name="password"]', LJ_PASSWORD, timeout=90000)  # 90s
+        print("Отправляю форму логина...")
+        await page.click('button[type="submit"]')
+        await page.wait_for_load_state("load")
+    except Exception as e:
+        print(f"Предупреждение при авторизации: {e}. Продолжаю с cookie 18+...")
 
     print(f"Переход на страницу: {LJ_URL}")
     await page.goto(LJ_URL, timeout=120000, wait_until="load")
@@ -226,7 +234,12 @@ async def scrape_and_generate_rss():
     async with async_playwright() as p:
         print("Запуск браузера...")
         browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
-        page = await browser.new_page()
+        context = await browser.new_context()
+        # Добавляем cookie для автоматического подтверждения 18+
+        await context.add_cookies([
+            {"name": "adult_explicit", "value": "1", "domain": ".livejournal.com", "path": "/"}
+        ])
+        page = await context.new_page()
         page.on("requestfailed", lambda request: print(f"Request failed: {request.url}"))
 
         await login_and_scrape(page)
@@ -293,8 +306,8 @@ async def scrape_and_generate_rss():
             print(f"- Пропускаю пост '{title}' из-за тегов: {', '.join(matched_excluded_tags)}")
             continue
 
-        if title == "(без темы)" and title_candidate:
-            title = title_candidate[:40]
+        if title in ("(без темы)", "(no subject)", "No Title") and title_candidate:
+            title = title_candidate[:60]
 
         # Добавление в RSS
         fe = fg.add_entry()
