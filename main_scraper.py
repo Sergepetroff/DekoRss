@@ -295,6 +295,44 @@ async def scrape_and_generate_rss():
         contenttag = post.find("div", class_="entry-content")
         title_candidate = contenttag.get_text(strip=True) if contenttag else "" # Вырезаем только чистый текст:
         description = contenttag.decode_contents() if contenttag else ""
+
+        # Если на главной странице ЖЖ вместо текста выдал заглушку 18+
+        if "appropriate for adults" in description or not description.strip() or len(title_candidate) < 15:
+            if link and link.startswith("http"):
+                try:
+                    import urllib.request
+                    post_req = urllib.request.Request(link, headers={
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Cookie': 'adult_explicit=1'
+                    })
+                    post_html = urllib.request.urlopen(post_req, timeout=15).read().decode('utf-8', errors='ignore')
+                    post_soup = BeautifulSoup(post_html, "html.parser")
+                    
+                    # Извлекаем реальный заголовок со страницы поста
+                    single_title = post_soup.find("h1", class_="aentry-post__title") or post_soup.find("title")
+                    if single_title:
+                        raw_t = single_title.get_text(strip=True)
+                        clean_t = re.sub(r':\s*dekodeko\s*—\s*LiveJournal.*$', '', raw_t).strip()
+                        if clean_t and clean_t not in ("(no subject)", "(без темы)"):
+                            title = clean_t
+
+                    # Извлекаем реальные теги со страницы поста
+                    single_tags = [
+                        a.get_text(strip=True)
+                        for a in post_soup.find_all("a", href=lambda h: h and "/tag/" in h)
+                        if a.get_text(strip=True)
+                    ]
+                    if single_tags:
+                        post_tags = single_tags
+
+                    # Извлекаем полный текст записи (класс в современной теме ЖЖ)
+                    single_content = post_soup.find("div", class_="aentry-post__text") or post_soup.find("article")
+                    if single_content:
+                        description = single_content.decode_contents()
+                        title_candidate = single_content.get_text(strip=True)
+                except Exception as enrich_err:
+                    print(f"Ошибка при загрузке полного текста {link}: {enrich_err}")
+
         normalized_description = normalize_rss_html(description)
         fixed_description = fix_emoji_sizes(normalized_description, size=18)
         post_tags = extract_post_tags(post)
