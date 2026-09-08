@@ -1,70 +1,56 @@
-# LiveJournal RSS Scraper  
-Скрипт автоматизирует вход в LiveJournal и создает Full Text RSS-ленту для указанного пользователя или блога. Даже если штатный RSS - отключен.
+# LiveJournal Full Text RSS Generator
 
-## Функциональность  
-- Авторизация через Playwright (в том числе 18+ страницы)  
-- Скрапинг постов с заданного URL  
-- Очистка HTML и корректировка размеров эмодзи  
-- Генерация RSS-файла (`..._lj_feed.xml`)  
-- Поддержка русскоязычных блогов  
+Легковесный инструмент для автоматической генерации полноценной Full Text RSS-ленты блога LiveJournal (ЖЖ), даже если штатный RSS в блоге отключен или урезан.
 
-## Требования  
-- Python ≥ 3.10  
-- Playwright, BeautifulSoup4, Feedgen, python-dotenv  
+## Возможности и особенности
 
-## Установка  
-```bash
-pip install -r requirements.txt
-playwright install chromium
+- **Быстрая генерация:** работает на прямых HTTP-запросах без лишних накладных расходов.
+- **Без авторизации:** не требует логина и пароля от аккаунта ЖЖ.
+- **Обход 18+ ограничений:** автоматическая загрузка полного текста постов через куку `adult_explicit=1`, исключая заглушки `(You are about to view content...)`.
+- **Извлечение авторских тегов:** парсит теги непосредственно со страниц записей.
+- **Гибкая фильтрация:** возможность исключать посты по нежелательным тегам (например, `#shorts`, `видео`).
+- **Нормализация HTML:** очистка от тяжелых скриптов, сторонних стилей и приведение размеров смайлов к аккуратному виду.
+- **Автономная работа (Keepalive):** GitHub Actions автоматически поддерживает активность репозитория, предотвращая отключение расписания cron.
+
+---
+
+## Переменные окружения (GitHub Secrets / .env)
+
+В настройках репозитория (`Settings` → `Secrets and variables` → `Actions`):
+
+| Переменная | Описание | Обязательна? | Пример |
+|---|---|---|---|
+| `LJ_URL` | URL блога ЖЖ | Да | `https://username.livejournal.com` |
+| `LJ_EXCLUDED_TAGS` | Теги для исключения (через запятую) | Нет | `видео,#shorts` |
+
+---
+
+## Автоматическая публикация (GitHub Actions)
+
+Воркфлоу `.github/workflows/deploy.yml`:
+1. Запускается по расписанию каждые 6 часов (или вручную через кнопку `Run workflow`).
+2. Устанавливает минимальные зависимости: `beautifulsoup4`, `feedgen`, `python-dotenv`.
+3. Генерирует RSS-файл и публикует его на **GitHub Pages**.
+4. Поддерживает активность репозитория, чтобы GitHub не отключал расписание при отсутствии изменений.
+
+Адрес готового RSS-потока для читалок (Feedly, Inoreader, NetNewsWire и др.):
+```
+https://<ваш-логин>.github.io/<имя-репозитория>/dekodeko_lj_feed.xml
 ```
 
-## Переменные окружения (.env)
-```bash
-LJ_URL=https://username.livejournal.com
-LJ_USERNAME=your_login
-LJ_PASSWORD=your_password
-LJ_EXCLUDED_TAGS=видео,#shorts
-```
+---
 
-`LJ_EXCLUDED_TAGS` опционален. Если задан, скрипт пропускает все посты, у которых есть хотя бы один тег из списка. Значения перечисляются через запятую, сравнение идет без учета регистра и лишних пробелов.
-
-Для локального ручного теста можно скопировать шаблон:
+## Локальный запуск (по желанию)
 
 ```bash
-cp .env.example .env
+# 1. Установка зависимостей
+pip install beautifulsoup4 feedgen python-dotenv
+
+# 2. Настройка переменных (или укажите их в файле .env)
+export LJ_URL="https://username.livejournal.com"
+export LJ_EXCLUDED_TAGS="видео,#shorts"
+
+# 3. Запуск генератора
+python main_scraper.py
 ```
-
-`PLAYWRIGHT_HEADLESS=false` включает видимый браузер, чтобы руками проверить логин, 18+ подтверждение и загрузку постов.
-
-## Ручная проверка перед merge
-
-### Локально
-```bash
-cp .env.example .env
-pip install playwright beautifulsoup4 feedgen python-dotenv
-playwright install chromium
-PLAYWRIGHT_HEADLESS=false python main_scraper.py
-```
-
-После выполнения проверьте файл `dekodeko_lj_feed.xml`.
-
-### Через GitHub Actions
-1. Откройте workflow `Generate, Preview and Publish RSS`.
-2. Нажмите **Run workflow** на нужной ветке.
-3. Оставьте `Deploy generated RSS to GitHub Pages` выключенным, если нужен только preview.
-4. Скачайте artifact `rss-preview` и проверьте `dekodeko_lj_feed.xml`.
-5. Если результат устраивает, повторно запустите workflow с включенным publish или мержите изменения.
-
-Для ручной проверки GroQ отдельно используйте workflow `GroQ Manual Tone Test` или локально:
-
-```bash
-python groq_manual_test.py "Тестовый абзац"
-```
-
-## Автодеплой (GitHub Actions)
-
-`deploy.yml` по расписанию автоматически генерирует и публикует RSS-файл через GitHub Pages artifact. При ручном запуске workflow можно сначала получить preview-артефакт без публикации.
-
-Сгенерированный файл `docs/dekodeko_lj_feed.xml` больше не коммитится обратно в `main`, поэтому он не должен создавать постоянные конфликты при merge/rebase.
-
-Для работы workflow в настройках репозитория GitHub Pages должен использовать источник `GitHub Actions`.
+Готовый RSS-файл появится в корне проекта.
