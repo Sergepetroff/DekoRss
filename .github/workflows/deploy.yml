@@ -6,7 +6,7 @@ on:
     - cron: '0 0/6 * * *'  # каждые 6 часов
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -28,14 +28,11 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install playwright beautifulsoup4 feedgen python-dotenv
-          playwright install
+          pip install beautifulsoup4 feedgen python-dotenv
 
       - name: Generate RSS feed
         env:
-          LJ_USERNAME: ${{ secrets.LJ_USERNAME }}
-          LJ_PASSWORD: ${{ secrets.LJ_PASSWORD }}      
-          LJ_URL:      ${{ secrets.LJ_URL }}      
+          LJ_URL: ${{ secrets.LJ_URL }}
           LJ_EXCLUDED_TAGS: ${{ secrets.LJ_EXCLUDED_TAGS }}
         run: |
           mkdir -p docs
@@ -46,6 +43,13 @@ jobs:
         uses: actions/upload-pages-artifact@v5
         with:
           path: docs
+
+      - name: Keep GitHub Actions alive (anti-inactivity timeout)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "keepalive: prevent workflow auto-disable" || echo "Nothing to commit"
+          git push origin main || echo "Keepalive push skipped"
 
   deploy:
     runs-on: ubuntu-latest
