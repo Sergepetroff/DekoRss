@@ -6,6 +6,8 @@
 .DS_Store
 vendor/
 node_modules/
+__pycache__/
+*.pyc
 
 # Render / Docker temp
 tmp/
