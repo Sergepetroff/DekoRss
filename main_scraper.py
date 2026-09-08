@@ -1,29 +1,35 @@
-import asyncio, hashlib, os, re
-from playwright.async_api import async_playwright
+import hashlib, os, re, sys, urllib.request
+import html as html_lib
 from bs4 import BeautifulSoup, NavigableString
 from feedgen.feed import FeedGenerator
-from datetime import datetime, timezone
+from datetime import datetime
 from email.utils import format_datetime
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # Конфигурация
-LOGIN_URL = "https://www.livejournal.com/login.bml"
-#LJ_URL = "https://dekodeko.livejournal.com"  
+LJ_URL = os.getenv("LJ_URL") or "https://dekodeko.livejournal.com"
 RSS_FILENAME = "dekodeko_lj_feed.xml"
 
-LJ_URL = os.getenv("LJ_URL")                # Страница для скрапинга после логина
-LJ_USERNAME = os.getenv("LJ_USERNAME")
-LJ_PASSWORD = os.getenv("LJ_PASSWORD")
 LJ_EXCLUDED_TAGS = {
     tag.strip().casefold()
     for tag in (os.getenv("LJ_EXCLUDED_TAGS") or "").split(",")
     if tag.strip()
 }
 
-if not LJ_USERNAME or not LJ_PASSWORD:
-    raise ValueError(f"LJ_USERNAME or LJ_PASSWORD not set! LJ_USERNAME={LJ_USERNAME}, LJ_PASSWORD={LJ_PASSWORD}")
-
+def fetch_url(url: str, timeout: int = 25) -> str:
+    """Загружает страницу с кукой adult_explicit=1 для обхода 18+ ограничений"""
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "Cookie": "adult_explicit=1",
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+        }
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        return response.read().decode("utf-8", errors="ignore")
 
 def extract_post_tags(post) -> list[str]:
     tag_container = post.find("div", class_="ljtags")
@@ -39,13 +45,11 @@ def extract_post_tags(post) -> list[str]:
 def fix_emoji_sizes(html: str, size: int = 18) -> str:
     """
     Проставляет явные размеры смайлам/эмодзи, чтобы они не раздувались в RSS.
-    Эвристики: по классам и по подстрокам в src.
     """
     soup = BeautifulSoup(html, "html.parser")
     for img in soup.find_all("img"):
         classes = img.get("class", [])
         src = img.get("src", "") or ""
-        # простые эвристики для LJ-смайлов
         is_smiley = any(k in classes for k in ("emoji", "emoticon", "smiley", "emote")) \
                     or any(x in src for x in ("emoji", "emoticon", "smiley", "smile"))
         if is_smiley:
@@ -58,7 +62,6 @@ def fix_emoji_sizes(html: str, size: int = 18) -> str:
         elif img.has_attr("style"):
             del img["style"]
     return str(soup)
-
 
 def wrap_loose_nodes_in_paragraphs(soup: BeautifulSoup) -> None:
     container = soup.body if soup.body else soup
@@ -102,7 +105,6 @@ def wrap_loose_nodes_in_paragraphs(soup: BeautifulSoup) -> None:
             child.extract()
 
     flush_inline_buffer()
-
 
 def normalize_rss_html(html: str) -> str:
     """
@@ -196,124 +198,125 @@ def normalize_rss_html(html: str) -> str:
             paragraph.decompose()
 
     return str(normalized_soup)
-    
-async def login_and_scrape(page):
-    print("Переход на страницу логина...")
-    await page.goto(LOGIN_URL, timeout=120000, wait_until="domcontentloaded")
-    await page.fill('input[name="user"]', LJ_USERNAME)
-    await page.fill('input[name="password"]', LJ_PASSWORD, timeout=90000)  # 90s
-    print("Отправляю форму логина...")
-    await page.click('button[type="submit"]')
-    await page.wait_for_load_state("load")
 
-    print(f"Переход на страницу: {LJ_URL}")
-    await page.goto(LJ_URL, timeout=120000, wait_until="load")
-
-    print("Проверка и обход 18+...")
+def scrape_and_generate_rss():
+    print(f"Загрузка главной страницы блога: {LJ_URL}...")
     try:
-        confirm = page.locator('text="Yes, I am at least 18 years old."')
-        visible = await confirm.is_visible()
-        print(f"18+ кнопка видима: {visible}")
-        if visible:
-            await confirm.click()
-            await page.wait_for_load_state('load')
+        html = fetch_url(LJ_URL)
     except Exception as e:
-        print(f"Кнопка 18+ отсутствует или ошибка: {e}")
+        print(f"Ошибка при загрузке главной страницы: {e}")
+        sys.exit(1)
 
-    await page.wait_for_selector("div.entry-wrap--post", timeout=120000)         # Ждём появления постов
-
-async def scrape_and_generate_rss():
-    async with async_playwright() as p:
-        print("Запуск браузера...")
-        browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
-        page = await browser.new_page()
-        page.on("requestfailed", lambda request: print(f"Request failed: {request.url}"))
-
-        await login_and_scrape(page)
-
-        print("Ожидание загрузки постов...")
-        try:
-            await page.wait_for_selector("div.entry-wrap--post", timeout=60000)
-        except Exception as e:
-            print(f"Не дождался постов: {e}")
-
-        print("Получение HTML страницы...")
-        html = await page.content()
-        print("Завершаю работу браузера...")
-        await browser.close()
-
-    print("Парсинг и генерация RSS...")
+    print("Парсинг ленты записей...")
     soup = BeautifulSoup(html, "html.parser")
     fg = FeedGenerator()
     fg.id(LJ_URL)
     fg.title("dekodeko LiveJournal RSS")
-    fg.author({"name": LJ_USERNAME})
+    fg.author({"name": "dekodeko"})
     fg.link(href=LJ_URL, rel="alternate")
     fg.description("Auto-generated RSS from LiveJournal")
     fg.language("ru")
 
     posts = soup.find_all("div", class_="entry-wrap--post")
     if not posts:
-        print("Внимание: посты не найдены!")
+        print("Внимание: посты не найдены в ленте!")
+        return
+
+    print(f"Найдено постов в ленте: {len(posts)}")
 
     for post in posts:
         # Заголовок
-        titletag = post.find('dt', class_='entry-title')
+        titletag = post.find("dt", class_="entry-title")
         title = titletag.get_text(strip=True) if titletag else "No Title"
 
         # Ссылка
-        linktag = titletag.find('a', href=True) if titletag else None
-        link = linktag['href'] if linktag else None
-        if link and link.startswith('/'):
-            link = LJ_URL + link
+        linktag = titletag.find("a", href=True) if titletag else None
+        link = linktag["href"] if linktag else None
+        if link and link.startswith("/"):
+            link = LJ_URL.rstrip("/") + link
         if not link:
             link = LJ_URL
 
         # Дата публикации
-        datetag = post.find('abbr', class_='updated')
-        if datetag and datetag.has_attr('title'):
-            dt_obj = datetime.fromisoformat(datetag['title'].replace('Z', '+00:00'))  # поддержка Z
-#            pubdate = dt_obj.strftime("%Y-%m-%d %H:%M")
-            pubdate = format_datetime(dt_obj)
-
+        datetag = post.find("abbr", class_="updated")
+        if datetag and datetag.has_attr("title"):
+            try:
+                dt_obj = datetime.fromisoformat(datetag["title"].replace("Z", "+00:00"))
+                pubdate = format_datetime(dt_obj)
+            except Exception:
+                pubdate = None
         else:
             pubdate = None
 
         contenttag = post.find("div", class_="entry-content")
-        title_candidate = contenttag.get_text(strip=True) if contenttag else "" # Вырезаем только чистый текст:
+        title_candidate = contenttag.get_text(strip=True) if contenttag else ""
         description = contenttag.decode_contents() if contenttag else ""
-        normalized_description = normalize_rss_html(description)
-        fixed_description = fix_emoji_sizes(normalized_description, size=18)
         post_tags = extract_post_tags(post)
+
+        # Если в ленте вместо текста заглушка 18+ или пустой текст:
+        # Загружаем страницу поста напрямую с кукой adult_explicit=1
+        if "appropriate for adults" in description or not description.strip() or len(title_candidate) < 15:
+            if link and link.startswith("http"):
+                try:
+                    post_html = fetch_url(link, timeout=15)
+                    post_soup = BeautifulSoup(post_html, "html.parser")
+
+                    # Извлекаем заголовок
+                    single_title = post_soup.find("h1", class_="aentry-post__title") or post_soup.find("title")
+                    if single_title:
+                        raw_t = single_title.get_text(strip=True)
+                        clean_t = re.sub(r":\s*dekodeko\s*—\s*LiveJournal.*$", "", raw_t).strip()
+                        if clean_t and clean_t not in ("(no subject)", "(без темы)"):
+                            title = clean_t
+
+                    # Извлекаем авторские теги
+                    single_tags = [
+                        a.get_text(strip=True)
+                        for a in post_soup.find_all("a", href=lambda h: h and "/tag/" in h)
+                        if a.get_text(strip=True)
+                    ]
+                    if single_tags:
+                        post_tags = single_tags
+
+                    # Извлекаем полный текст записи
+                    single_content = post_soup.find("div", class_="aentry-post__text") or post_soup.find("article")
+                    if single_content:
+                        description = single_content.decode_contents()
+                        title_candidate = single_content.get_text(strip=True)
+                except Exception as enrich_err:
+                    print(f"Ошибка при загрузке {link}: {enrich_err}")
+
+        # Фильтрация по исключённым тегам
         matched_excluded_tags = [
             tag for tag in post_tags if tag.casefold() in LJ_EXCLUDED_TAGS
         ]
-
         if matched_excluded_tags:
             print(f"- Пропускаю пост '{title}' из-за тегов: {', '.join(matched_excluded_tags)}")
             continue
 
-        if title == "(без темы)" and title_candidate:
-            title = title_candidate[:40]
+        normalized_description = normalize_rss_html(description)
+        fixed_description = fix_emoji_sizes(normalized_description, size=18)
+
+        if title in ("(без темы)", "(no subject)", "No Title") and title_candidate:
+            title = title_candidate[:60]
 
         # Добавление в RSS
         fe = fg.add_entry()
         fe.title(title)
         fe.link(href=link)
-#        fe.description(description)
         fe.content(fixed_description, type="CDATA")
 
         if pubdate:
             fe.pubDate(pubdate)
 
-        guid = link if link else hashlib.md5(title.encode('utf-8')).hexdigest()
+        guid = link if link else hashlib.md5(title.encode("utf-8")).hexdigest()
         fe.guid(guid, permalink=bool(link))
 
-        print(f"| {title} | {pubdate} | {guid}")
-        fg.rss_file(RSS_FILENAME)         # После того, как все записи добавлены
+        print(f"| {title[:50]} | {pubdate} | {guid}")
 
+    fg.rss_file(RSS_FILENAME)
     print("-" * 40)
     print(f"RSS файл записан: {RSS_FILENAME}")
 
 if __name__ == "__main__":
-    asyncio.run(scrape_and_generate_rss())
+    scrape_and_generate_rss()
