@@ -1,9 +1,16 @@
-import hashlib, os, re, sys, urllib.request
+import hashlib
+import http.cookiejar
+import os
+import re
+import sys
+import time
+import urllib.parse
+import urllib.request
 import html as html_lib
-from bs4 import BeautifulSoup, NavigableString
-from feedgen.feed import FeedGenerator
 from datetime import datetime
 from email.utils import format_datetime
+from bs4 import BeautifulSoup, NavigableString
+from feedgen.feed import FeedGenerator
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -18,18 +25,232 @@ LJ_EXCLUDED_TAGS = {
     if tag.strip()
 }
 
-def fetch_url(url: str, timeout: int = 25) -> str:
-    """Загружает страницу с кукой adult_explicit=1 для обхода 18+ ограничений"""
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            "Cookie": "adult_explicit=1",
-            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-        }
+ADULT_WARNING_PHRASES = (
+    "appropriate for adults",
+    "adult content notice",
+    "explicit adult content",
+    "adult concepts",
+    "содержимое только для взрослых",
+    "подтвердите свой возраст",
+    "you are about to view content",
+    "материалы только для взрослых",
+)
+
+ADULT_COOKIES_HEADER = (
+    "adult_explicit=1; adult_concepts=1; adult_mature=1; adult_content=1; "
+    "prop_opt_adult_filter=none; lj_adult=1; bml_opt_adult=1; adult_check=1"
+)
+
+# Настройка CookieJar для сохранения сессионных кук LJ и передачи adult-флагов при любых редиректах
+cookie_jar = http.cookiejar.CookieJar()
+for c_name, c_val in [
+    ("adult_explicit", "1"),
+    ("adult_concepts", "1"),
+    ("adult_mature", "1"),
+    ("adult_content", "1"),
+    ("prop_opt_adult_filter", "none"),
+    ("lj_adult", "1"),
+    ("bml_opt_adult", "1"),
+    ("adult_check", "1"),
+]:
+    cookie_jar.set_cookie(
+        http.cookiejar.Cookie(
+            version=0,
+            name=c_name,
+            value=c_val,
+            port=None,
+            port_specified=False,
+            domain=".livejournal.com",
+            domain_specified=True,
+            domain_initial_dot=True,
+            path="/",
+            path_specified=True,
+            secure=False,
+            expires=None,
+            discard=True,
+            comment=None,
+            comment_url=None,
+            rest={"HttpOnly": None},
+            rfc2109=False,
+        )
     )
-    with urllib.request.urlopen(req, timeout=timeout) as response:
-        return response.read().decode("utf-8", errors="ignore")
+
+http_opener = urllib.request.build_opener(
+    urllib.request.HTTPCookieProcessor(cookie_jar)
+)
+
+def is_adult_stub(text: str) -> bool:
+    """Проверяет, является ли текст заглушкой о возрастном ограничении 18+."""
+    if not text:
+        return True
+    lower = text.lower()
+    return any(phrase in lower for phrase in ADULT_WARNING_PHRASES)
+
+def fetch_url(url: str, timeout: int = 25, retries: int = 3, data: bytes = None) -> str:
+    """
+    Загружает страницу с полным набором 18+ кук, автоматическим сохранением сессии
+    и механизмом повторных попыток при сбоях сети/таймаутах.
+    """
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+        ),
+        "Cookie": ADULT_COOKIES_HEADER,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://dekodeko.livejournal.com/",
+    }
+
+    last_err = None
+    for attempt in range(1, retries + 1):
+        try:
+            req = urllib.request.Request(url, data=data, headers=headers)
+            with http_opener.open(req, timeout=timeout) as response:
+                return response.read().decode("utf-8", errors="ignore")
+        except Exception as e:
+            last_err = e
+            if attempt < retries:
+                time.sleep(1.0 * attempt)
+
+    raise last_err or Exception(f"Failed to fetch {url}")
+
+def extract_single_post(post_url: str) -> tuple[str, list[str], str]:
+    """
+    Загружает отдельную страницу записи LiveJournal и извлекает:
+    (title, tags, clean_html_content).
+    При необходимости использует легкий формат ?format=light или отправляет форму подтверждения 18+.
+    """
+    urls_to_try = [post_url]
+    if "?" not in post_url:
+        urls_to_try.append(f"{post_url}?format=light")
+
+    title = ""
+    tags: list[str] = []
+    content_html = ""
+
+    for url_candidate in urls_to_try:
+        try:
+            html = fetch_url(url_candidate, timeout=15, retries=2)
+            soup = BeautifulSoup(html, "html.parser")
+
+            # 1. Заголовок
+            title_node = (
+                soup.find("h1", class_="aentry-post__title")
+                or soup.find("meta", property="og:title")
+                or soup.find("title")
+            )
+            if title_node:
+                raw_t = title_node.get("content", "") if title_node.name == "meta" else title_node.get_text(strip=True)
+                clean_t = re.sub(r":\s*dekodeko\s*—\s*LiveJournal.*$", "", raw_t, flags=re.IGNORECASE).strip()
+                clean_t = re.sub(r"—\s*LiveJournal.*$", "", clean_t, flags=re.IGNORECASE).strip()
+                if (
+                    clean_t
+                    and not is_adult_stub(clean_t)
+                    and clean_t not in ("(no subject)", "(без темы)", "No Title")
+                ):
+                    title = clean_t
+
+            # 2. Авторские теги
+            found_tags = [
+                a.get_text(strip=True)
+                for a in soup.find_all("a", href=lambda h: h and "/tag/" in h)
+                if a.get_text(strip=True)
+            ]
+            if found_tags:
+                tags = found_tags
+
+            # 3. Поиск основного текста в известных контейнерах LJ
+            candidate_tags = [
+                soup.find("div", class_="aentry-post__text"),
+                soup.find("div", class_="entry-content"),
+                soup.find("div", class_="entry_text"),
+                soup.find("div", class_="asset-body"),
+                soup.find("div", class_="b-singlepost-body"),
+                soup.find("div", class_="j-e-text"),
+            ]
+
+            for cand in candidate_tags:
+                if not cand:
+                    continue
+                cand_text = cand.get_text(strip=True)
+                # Никогда не принимаем блок, содержащий заглушку 18+
+                if not is_adult_stub(cand_text) and len(cand_text) > 15:
+                    content_html = cand.decode_contents()
+                    break
+
+            if content_html and not is_adult_stub(content_html):
+                break
+
+            # 4. Если на странице есть форма подтверждения возраста, отправляем ее (POST)
+            adult_form = soup.find(
+                "form",
+                action=lambda a: a and any(k in a.lower() for k in ("adult", "check", "confirm")),
+            )
+            if adult_form:
+                action = adult_form.get("action") or post_url
+                if action.startswith("/"):
+                    action = urllib.parse.urljoin(post_url, action)
+                form_data = {}
+                for inp in adult_form.find_all("input"):
+                    name = inp.get("name")
+                    if name:
+                        form_data[name] = inp.get("value", "")
+                form_data["adult_check"] = "1"
+                encoded = urllib.parse.urlencode(form_data).encode("utf-8")
+
+                post_resp = fetch_url(action, data=encoded, timeout=15, retries=1)
+                soup2 = BeautifulSoup(post_resp, "html.parser")
+                for cand in [
+                    soup2.find("div", class_="aentry-post__text"),
+                    soup2.find("div", class_="entry-content"),
+                    soup2.find("div", class_="b-singlepost-body"),
+                ]:
+                    if cand and not is_adult_stub(cand.get_text(strip=True)):
+                        content_html = cand.decode_contents()
+                        break
+                if content_html:
+                    break
+
+        except Exception:
+            continue
+
+    return title, tags, content_html
+
+def load_existing_feed(filenames: list[str]) -> dict[str, dict]:
+    """
+    Загружает предыдущий сгенерированный RSS файл для защиты от перезаписи
+    качественных постов пустыми заглушками при временных сетевых ошибках LiveJournal.
+    """
+    entries = {}
+    for filename in filenames:
+        if not os.path.exists(filename):
+            continue
+        try:
+            with open(filename, "r", encoding="utf-8", errors="ignore") as f:
+                feed_soup = BeautifulSoup(f.read(), "xml")
+            for item in feed_soup.find_all("item"):
+                link_node = item.find("link")
+                link = link_node.get_text(strip=True) if link_node else ""
+                title_node = item.find("title")
+                title = title_node.get_text(strip=True) if title_node else ""
+                content_node = item.find("content:encoded") or item.find("description")
+                content = content_node.decode_contents() if content_node else ""
+                content_text = content_node.get_text(strip=True) if content_node else ""
+
+                if link and not is_adult_stub(title) and not is_adult_stub(content_text):
+                    entries[link] = {
+                        "title": title,
+                        "content": content,
+                        "pubDate": item.find("pubDate").get_text(strip=True) if item.find("pubDate") else None,
+                        "guid": item.find("guid").get_text(strip=True) if item.find("guid") else link,
+                    }
+            if entries:
+                print(f"Загружено {len(entries)} сохраненных постов из {filename} для защиты от сбоев.")
+                break
+        except Exception as e:
+            print(f"Предупреждение при чтении {filename}: {e}")
+    return entries
 
 def extract_post_tags(post) -> list[str]:
     tag_container = post.find("div", class_="ljtags")
@@ -43,15 +264,14 @@ def extract_post_tags(post) -> list[str]:
     ]
 
 def fix_emoji_sizes(html: str, size: int = 18) -> str:
-    """
-    Проставляет явные размеры смайлам/эмодзи, чтобы они не раздувались в RSS.
-    """
+    """Проставляет явные размеры смайлам/эмодзи, чтобы они не раздувались в RSS."""
     soup = BeautifulSoup(html, "html.parser")
     for img in soup.find_all("img"):
         classes = img.get("class", [])
         src = img.get("src", "") or ""
-        is_smiley = any(k in classes for k in ("emoji", "emoticon", "smiley", "emote")) \
-                    or any(x in src for x in ("emoji", "emoticon", "smiley", "smile"))
+        is_smiley = any(k in classes for k in ("emoji", "emoticon", "smiley", "emote")) or any(
+            x in src for x in ("emoji", "emoticon", "smiley", "smile")
+        )
         if is_smiley:
             img["width"] = str(size)
             img["height"] = str(size)
@@ -92,7 +312,11 @@ def wrap_loose_nodes_in_paragraphs(soup: BeautifulSoup) -> None:
 
     for child in list(container.contents):
         is_inline_text = isinstance(child, NavigableString) and bool(str(child).strip())
-        is_inline_tag = getattr(child, "name", None) not in block_tags if not isinstance(child, NavigableString) else False
+        is_inline_tag = (
+            getattr(child, "name", None) not in block_tags
+            if not isinstance(child, NavigableString)
+            else False
+        )
 
         if is_inline_text or is_inline_tag:
             if insert_before_node is None:
@@ -107,9 +331,7 @@ def wrap_loose_nodes_in_paragraphs(soup: BeautifulSoup) -> None:
     flush_inline_buffer()
 
 def normalize_rss_html(html: str) -> str:
-    """
-    Упрощает HTML из LJ до более чистого и предсказуемого RSS-контента.
-    """
+    """Упрощает HTML из LJ до чистого и предсказуемого RSS-контента."""
     soup = BeautifulSoup(html, "html.parser")
 
     for tag in soup.find_all(["script", "style", "svg", "form", "input", "button", "textarea"]):
@@ -201,10 +423,15 @@ def normalize_rss_html(html: str) -> str:
 
 def scrape_and_generate_rss():
     print(f"Загрузка главной страницы блога: {LJ_URL}...")
+    cached_entries = load_existing_feed([f"docs/{RSS_FILENAME}", RSS_FILENAME])
+
     try:
-        html = fetch_url(LJ_URL)
+        html = fetch_url(LJ_URL, timeout=25, retries=3)
     except Exception as e:
         print(f"Ошибка при загрузке главной страницы: {e}")
+        if cached_entries:
+            print("Сохраняем существующий RSS без изменений из-за ошибки сети.")
+            sys.exit(0)
         sys.exit(1)
 
     print("Парсинг ленты записей...")
@@ -224,12 +451,12 @@ def scrape_and_generate_rss():
 
     print(f"Найдено постов в ленте: {len(posts)}")
 
-    for post in posts:
-        # Заголовок
+    for idx, post in enumerate(posts):
+        # 1. Заголовок из ленты
         titletag = post.find("dt", class_="entry-title")
-        title = titletag.get_text(strip=True) if titletag else "No Title"
+        raw_title = titletag.get_text(strip=True) if titletag else ""
 
-        # Ссылка
+        # 2. Ссылка
         linktag = titletag.find("a", href=True) if titletag else None
         link = linktag["href"] if linktag else None
         if link and link.startswith("/"):
@@ -237,68 +464,91 @@ def scrape_and_generate_rss():
         if not link:
             link = LJ_URL
 
-        # Дата публикации
+        # ID поста для формирования резервного заголовка
+        post_id_match = re.search(r"/(\d+)\.html", link)
+        post_id = post_id_match.group(1) if post_id_match else str(idx + 1)
+
+        # 3. Дата публикации
         datetag = post.find("abbr", class_="updated")
+        pubdate = None
+        pubdate_str = ""
         if datetag and datetag.has_attr("title"):
             try:
                 dt_obj = datetime.fromisoformat(datetag["title"].replace("Z", "+00:00"))
                 pubdate = format_datetime(dt_obj)
+                pubdate_str = dt_obj.strftime("%d.%m.%Y %H:%M")
             except Exception:
                 pubdate = None
-        else:
-            pubdate = None
 
         contenttag = post.find("div", class_="entry-content")
-        title_candidate = contenttag.get_text(strip=True) if contenttag else ""
+        raw_content_text = contenttag.get_text(strip=True) if contenttag else ""
         description = contenttag.decode_contents() if contenttag else ""
         post_tags = extract_post_tags(post)
 
-        # Если в ленте вместо текста заглушка 18+ или пустой текст:
-        # Загружаем страницу поста напрямую с кукой adult_explicit=1
-        if "appropriate for adults" in description or not description.strip() or len(title_candidate) < 15:
-            if link and link.startswith("http"):
+        # Проверяем, является ли заголовок или контент в ленте заглушкой 18+
+        title = raw_title if raw_title and not is_adult_stub(raw_title) else ""
+        needs_enrichment = is_adult_stub(raw_content_text) or len(raw_content_text) < 25 or not title
+
+        if needs_enrichment and link.startswith("http"):
+            # Для не-первых постов, если они уже есть в качественном кэше, берем из кэша
+            if idx >= 5 and link in cached_entries:
+                cached = cached_entries[link]
+                title = cached.get("title") or title
+                description = cached.get("content") or description
+            else:
+                # Загружаем отдельную страницу поста с обходом 18+
                 try:
-                    post_html = fetch_url(link, timeout=15)
-                    post_soup = BeautifulSoup(post_html, "html.parser")
-
-                    # Извлекаем заголовок
-                    single_title = post_soup.find("h1", class_="aentry-post__title") or post_soup.find("title")
-                    if single_title:
-                        raw_t = single_title.get_text(strip=True)
-                        clean_t = re.sub(r":\s*dekodeko\s*—\s*LiveJournal.*$", "", raw_t).strip()
-                        if clean_t and clean_t not in ("(no subject)", "(без темы)"):
-                            title = clean_t
-
-                    # Извлекаем авторские теги
-                    single_tags = [
-                        a.get_text(strip=True)
-                        for a in post_soup.find_all("a", href=lambda h: h and "/tag/" in h)
-                        if a.get_text(strip=True)
-                    ]
-                    if single_tags:
-                        post_tags = single_tags
-
-                    # Извлекаем полный текст записи
-                    single_content = post_soup.find("div", class_="aentry-post__text") or post_soup.find("article")
-                    if single_content:
-                        description = single_content.decode_contents()
-                        title_candidate = single_content.get_text(strip=True)
+                    time.sleep(0.3)  # Бережный интервал против рейт-лимита LJ
+                    enriched_title, enriched_tags, enriched_html = extract_single_post(link)
+                    if enriched_title and not is_adult_stub(enriched_title):
+                        title = enriched_title
+                    if enriched_tags:
+                        post_tags = enriched_tags
+                    if enriched_html and not is_adult_stub(enriched_html):
+                        description = enriched_html
+                    elif link in cached_entries:
+                        # Резервный откат к кэшу, если новая попытка не вернула текст
+                        cached = cached_entries[link]
+                        title = cached.get("title") or title
+                        description = cached.get("content") or description
                 except Exception as enrich_err:
                     print(f"Ошибка при загрузке {link}: {enrich_err}")
+                    if link in cached_entries:
+                        cached = cached_entries[link]
+                        title = cached.get("title") or title
+                        description = cached.get("content") or description
+
+        # Если после всех попыток контент всё еще содержит только заглушку 18+:
+        if is_adult_stub(description) or is_adult_stub(BeautifulSoup(description, "html.parser").get_text(strip=True)):
+            if link in cached_entries:
+                description = cached_entries[link].get("content") or description
+                title = cached_entries[link].get("title") or title
+            else:
+                description = (
+                    f"<p>Запись LiveJournal (18+).</p>"
+                    f"<p><a href=\"{link}\">Открыть запись в блоге dekodeko</a></p>"
+                )
 
         # Фильтрация по исключённым тегам
         matched_excluded_tags = [
             tag for tag in post_tags if tag.casefold() in LJ_EXCLUDED_TAGS
         ]
         if matched_excluded_tags:
-            print(f"- Пропускаю пост '{title}' из-за тегов: {', '.join(matched_excluded_tags)}")
+            print(f"- Пропускаю пост '{title or link}' из-за тегов: {', '.join(matched_excluded_tags)}")
             continue
 
         normalized_description = normalize_rss_html(description)
         fixed_description = fix_emoji_sizes(normalized_description, size=18)
 
-        if title in ("(без темы)", "(no subject)", "No Title") and title_candidate:
-            title = title_candidate[:60]
+        # Финализация заголовка: никогда не допускаем заголовок с предупреждением 18+
+        clean_text_snippet = BeautifulSoup(fixed_description, "html.parser").get_text(" ", strip=True)
+        if is_adult_stub(title) or title in ("(без темы)", "(no subject)", "No Title", ""):
+            if clean_text_snippet and not is_adult_stub(clean_text_snippet):
+                title = clean_text_snippet[:60].replace("\n", " ").strip()
+            elif pubdate_str:
+                title = f"Запись от {pubdate_str}"
+            else:
+                title = f"Запись #{post_id}"
 
         # Добавление в RSS
         fe = fg.add_entry()

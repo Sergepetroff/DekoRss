@@ -1,0 +1,6 @@
+{
+  "name": "DekoRss - LiveJournal RSS Feed",
+  "description": "Full-text RSS feed generator and scraper for LiveJournal blogs with HTML cleaning, emoji sizing, and tag filtering.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
