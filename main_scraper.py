@@ -217,33 +217,52 @@ def extract_single_post(post_url: str) -> tuple[str, list[str], str]:
 
     return title, tags, content_html
 
+def format_title_with_size(title: str, text: str) -> str:
+    """
+    Форматирует заголовок поста с указанием размера чистого текста в килобайтах
+    первым элементом: (9.9k) Заголовок.
+    """
+    clean_title = re.sub(r"^\(\d+(?:\.\d+)?k\)\s*", "", title or "").strip()
+    size_kb = len((text or "").encode("utf-8")) / 1024.0
+    prefix = f"({size_kb:.1f}k)"
+    return f"{prefix} {clean_title}".strip() if clean_title else prefix
+
 def load_existing_feed(filenames: list[str]) -> dict[str, dict]:
     """
     Загружает предыдущий сгенерированный RSS файл для защиты от перезаписи
     качественных постов пустыми заглушками при временных сетевых ошибках LiveJournal.
     """
+    import xml.etree.ElementTree as ET
     entries = {}
     for filename in filenames:
         if not os.path.exists(filename):
             continue
         try:
-            with open(filename, "r", encoding="utf-8", errors="ignore") as f:
-                feed_soup = BeautifulSoup(f.read(), "xml")
-            for item in feed_soup.find_all("item"):
+            tree = ET.parse(filename)
+            root = tree.getroot()
+            for item in root.findall(".//item"):
                 link_node = item.find("link")
-                link = link_node.get_text(strip=True) if link_node else ""
+                link = (link_node.text or "").strip() if link_node is not None else ""
                 title_node = item.find("title")
-                title = title_node.get_text(strip=True) if title_node else ""
-                content_node = item.find("content:encoded") or item.find("description")
-                content = content_node.decode_contents() if content_node else ""
-                content_text = content_node.get_text(strip=True) if content_node else ""
+                title = (title_node.text or "").strip() if title_node is not None else ""
+                
+                content_node = item.find("{http://purl.org/rss/1.0/modules/content/}encoded")
+                if content_node is None:
+                    content_node = item.find("description")
+                content = content_node.text or "" if content_node is not None else ""
+                
+                content_text = BeautifulSoup(content, "html.parser").get_text(" ", strip=True) if content else ""
+                pubdate_node = item.find("pubDate")
+                pubdate = (pubdate_node.text or "").strip() if pubdate_node is not None else None
+                guid_node = item.find("guid")
+                guid = (guid_node.text or "").strip() if guid_node is not None else link
 
                 if link and not is_adult_stub(title) and not is_adult_stub(content_text):
                     entries[link] = {
                         "title": title,
                         "content": content,
-                        "pubDate": item.find("pubDate").get_text(strip=True) if item.find("pubDate") else None,
-                        "guid": item.find("guid").get_text(strip=True) if item.find("guid") else link,
+                        "pubDate": pubdate,
+                        "guid": guid,
                     }
             if entries:
                 print(f"Загружено {len(entries)} сохраненных постов из {filename} для защиты от сбоев.")
@@ -549,6 +568,9 @@ def scrape_and_generate_rss():
                 title = f"Запись от {pubdate_str}"
             else:
                 title = f"Запись #{post_id}"
+
+        # Добавляем размер текста в килобайтах первым элементом заголовка: (9.9k)
+        title = format_title_with_size(title, clean_text_snippet)
 
         # Добавление в RSS
         fe = fg.add_entry()
