@@ -217,27 +217,15 @@ def extract_single_post(post_url: str) -> tuple[str, list[str], str]:
 
     return title, tags, content_html
 
-def format_post_content_with_badge(content: str, text: str) -> str:
+def format_title_with_size(title: str, text: str) -> str:
     """
-    Добавляет цветной бейдж с размером чистого текста поста в начало контента статьи:
-    приглушенный серо-синий оттенок (#5a738e) с полупрозрачной подложкой,
-    выделяющийся на фоне основного текста и читаемый в любой теме.
+    Форматирует заголовок поста с указанием размера чистого текста в килобайтах
+    первым элементом: (9.9k) Заголовок.
     """
-    clean_text = BeautifulSoup(content, "html.parser").get_text(" ", strip=True) if not text else text
-    size_kb = len((clean_text or "").encode("utf-8")) / 1024.0
-    clean_content = re.sub(
-        r'<div style="[^"]*">\(\d+(?:\.\d+)?k\)</div>(?:\s*<br\s*/?>)?',
-        '',
-        content or '',
-        flags=re.IGNORECASE
-    ).strip()
-    badge_html = (
-        f'<div style="display:inline-block; color:#5a738e; '
-        f'background:rgba(90,115,142,0.1); border:1px solid rgba(90,115,142,0.25); '
-        f'border-radius:4px; padding:1px 7px; font-size:12px; font-weight:500; '
-        f'margin-bottom:10px;">({size_kb:.1f}k)</div>'
-    )
-    return f"{badge_html}<br/>{clean_content}" if clean_content else badge_html
+    clean_title = re.sub(r"^\(\d+(?:\.\d+)?k\)\s*", "", title or "").strip()
+    size_kb = len((text or "").encode("utf-8")) / 1024.0
+    prefix = f"({size_kb:.1f}k)"
+    return f"{prefix} {clean_title}".strip() if clean_title else prefix
 
 def load_existing_feed(filenames: list[str]) -> dict[str, dict]:
     """
@@ -262,6 +250,12 @@ def load_existing_feed(filenames: list[str]) -> dict[str, dict]:
                 if content_node is None:
                     content_node = item.find("description")
                 content = content_node.text or "" if content_node is not None else ""
+                content = re.sub(
+                    r'<div style="[^"]*">\(\d+(?:\.\d+)?k\)</div>(?:\s*<br\s*/?>)?',
+                    '',
+                    content,
+                    flags=re.IGNORECASE
+                ).strip()
                 
                 content_text = BeautifulSoup(content, "html.parser").get_text(" ", strip=True) if content else ""
                 pubdate_node = item.find("pubDate")
@@ -581,17 +575,22 @@ def scrape_and_generate_rss():
             else:
                 title = f"Запись #{post_id}"
 
-        # Очищаем заголовок от старых префиксов размера
-        title = re.sub(r"^\(\d+(?:\.\d+)?k\)\s*", "", title or "").strip()
+        # Очищаем контент от остатков бейджей, если они были
+        clean_content = re.sub(
+            r'<div style="[^"]*">\(\d+(?:\.\d+)?k\)</div>(?:\s*<br\s*/?>)?',
+            '',
+            fixed_description,
+            flags=re.IGNORECASE
+        ).strip()
 
-        # Добавляем цветной бейдж с размером текста в начало контента статьи
-        final_content = format_post_content_with_badge(fixed_description, clean_text_snippet)
+        # Добавляем размер текста в килобайтах первым элементом заголовка: (9.9k)
+        title = format_title_with_size(title, clean_text_snippet)
 
         # Добавление в RSS
         fe = fg.add_entry()
         fe.title(title)
         fe.link(href=link)
-        fe.content(final_content, type="CDATA")
+        fe.content(clean_content, type="CDATA")
 
         if pubdate:
             fe.pubDate(pubdate)
