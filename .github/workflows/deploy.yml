@@ -36,7 +36,9 @@ jobs:
           LJ_EXCLUDED_TAGS: ${{ secrets.LJ_EXCLUDED_TAGS }}
         run: |
           mkdir -p docs
-          python main_scraper.py
+          # Скачиваем текущий опубликованный фид с Pages в качестве надежного кэша
+          curl -s -f -o docs/dekodeko_lj_feed.xml https://sergepetroff.github.io/DekoRss/dekodeko_lj_feed.xml || true
+          python main_scraper.py || true
           if [ -f dekodeko_lj_feed.xml ]; then
             mv dekodeko_lj_feed.xml docs/
           fi
