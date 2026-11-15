@@ -6,7 +6,7 @@ on:
     branches:
       - main
   schedule:
-    - cron: '0 0/6 * * *'  # каждые 6 часов
+    - cron: '0 */6 * * *'  # каждые 6 часов
 
 permissions:
   contents: write
@@ -24,10 +24,23 @@ jobs:
       - name: Checkout main branch
         uses: actions/checkout@v6
 
+      # ---------- Cloudflare WARP ----------
+      - name: Start Cloudflare WARP (VPN to bypass Azure IP block)
+        uses: fscarmen/warp-on-actions@v1.4
+        # free mode works without a token; uncomment the block below if you have a WARP+ token
+        # with:
+        #   warp-token: ${{ secrets.CLOUDFLARE_WARP_TOKEN }}
+
+      # ---------- Debug – show public IPs after WARP ----------
+      - name: Show public IPs (debug)
+        run: |
+          echo "🟢 IPv4 after WARP: $(curl -s -4 https://api.ipify.org)"
+          echo "🟢 IPv6 after WARP: $(curl -s -6 https://api64.ipify.org)"
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Install dependencies
         run: |
@@ -39,11 +52,16 @@ jobs:
           LJ_EXCLUDED_TAGS: ${{ secrets.LJ_EXCLUDED_TAGS }}
         run: |
           mkdir -p docs
-          # Скачиваем текущий опубликованный фид с Pages в качестве надежного кэша
+          # download current feed as cache (ignore errors)
           curl -s -f -o docs/dekodeko_lj_feed.xml https://sergepetroff.github.io/DekoRss/dekodeko_lj_feed.xml || true
-          python main_scraper.py || true
+          # run scraper; fallback logic inside the script handles missing posts
+          python main_scraper.py
+          # move generated feed only if it exists
           if [ -f dekodeko_lj_feed.xml ]; then
             mv dekodeko_lj_feed.xml docs/
+            echo "✅ New feed moved to docs/"
+          else
+            echo "⚠️ Feed not generated – keeping cached version"
           fi
 
       - name: Upload Pages artifact
