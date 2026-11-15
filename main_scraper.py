@@ -472,7 +472,20 @@ def scrape_and_generate_rss():
     posts = soup.find_all("div", class_="entry-wrap--post")
     if not posts:
         print("Внимание: посты не найдены в ленте!")
-        return
+        if cached_entries:
+            print("Восстанавливаем фид из кэша, чтобы не ломать публикацию.")
+            for c_link, c_item in cached_entries.items():
+                fe = fg.add_entry()
+                fe.title(c_item.get("title") or "Запись")
+                fe.link(href=c_link)
+                fe.content(c_item.get("content") or "", type="CDATA")
+                if c_item.get("pubdate"):
+                    fe.pubDate(c_item.get("pubdate"))
+                fe.guid(c_link, permalink=True)
+            fg.rss_file(RSS_FILENAME)
+            print(f"Кэшированный RSS файл записан: {RSS_FILENAME}")
+            return
+        raise RuntimeError("Не удалось извлечь посты со страницы ЖЖ и нет кэша.")
 
     print(f"Найдено постов в ленте: {len(posts)}")
 

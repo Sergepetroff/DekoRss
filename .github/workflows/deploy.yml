@@ -37,7 +37,9 @@ jobs:
         run: |
           mkdir -p docs
           python main_scraper.py
-          mv dekodeko_lj_feed.xml docs/
+          if [ -f dekodeko_lj_feed.xml ]; then
+            mv dekodeko_lj_feed.xml docs/
+          fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
